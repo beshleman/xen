@@ -13,7 +13,7 @@ void percpu_init_areas(void);
 
 #define per_cpu(var, cpu)  \
     (*RELOC_HIDE(&per_cpu__##var, __per_cpu_offset[cpu]))
-#define __get_cpu_var(var) \
+#define this_cpu(var) \
     (*RELOC_HIDE(&per_cpu__##var, csr_read(sscratch)))
 
 #define per_cpu_ptr(var, cpu)  \
