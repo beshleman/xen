@@ -28,8 +28,6 @@ pte_t boot_pgtable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 pte_t boot_first[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 pte_t boot_first_id[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 
-struct domain *dom_xen, *dom_io, *dom_cow;
-
 /* Limits of the Xen heap */
 mfn_t xenheap_mfn_start __read_mostly = INVALID_MFN_INITIALIZER;
 mfn_t xenheap_mfn_end __read_mostly;
@@ -71,32 +69,6 @@ void set_fixmap(unsigned map, mfn_t mfn, unsigned int flags)
 void clear_fixmap(unsigned map)
 {
 
-}
-
-void __init arch_init_memory(void)
-{
-    /*
-     * Initialise our DOMID_XEN domain.
-     * Any Xen-heap pages that we will allow to be mapped will have
-     * their domain field set to dom_xen.
-     */
-    dom_xen = domain_create(DOMID_XEN, NULL, false);
-    BUG_ON(IS_ERR(dom_xen));
-
-    /*
-     * Initialise our DOMID_IO domain.
-     * This domain owns I/O pages that are within the range of the page_info
-     * array. Mappings occur at the priv of the caller.
-     */
-    dom_io = domain_create(DOMID_IO, NULL, false);
-    BUG_ON(IS_ERR(dom_io));
-
-    /*
-     * Initialise our COW domain.
-     * This domain owns sharable pages.
-     */
-    dom_cow = domain_create(DOMID_COW, NULL, false);
-    BUG_ON(IS_ERR(dom_cow));
 }
 
 void flush_page_to_ram(unsigned long mfn, bool sync_icache)
@@ -376,7 +348,7 @@ unsigned long get_upper_mfn_bound(void)
 }
 
 void setup_pagetables(unsigned long boot_phys_offset)
-{   
+{
     pte_t *p, pte;
     int i;
 

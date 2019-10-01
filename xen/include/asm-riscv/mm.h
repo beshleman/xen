@@ -8,8 +8,6 @@
 #include <xen/pdx.h>
 #include <xen/errno.h>
 
-extern struct domain *dom_xen, *dom_io, *dom_cow;
-
 /* Align Xen to a 2 MiB boundary. */
 #define XEN_PADDR_ALIGN (1 << 21)
 
