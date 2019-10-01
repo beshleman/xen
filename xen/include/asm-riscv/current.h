@@ -37,6 +37,14 @@ static inline struct cpu_info *get_cpu_info(void)
 
 #define reset_stack_and_jump(fn) switch_stack_and_jump(get_cpu_info(), fn)
 
+DECLARE_PER_CPU(unsigned int, cpu_id);
+
+#define get_processor_id()    (this_cpu(cpu_id))
+#define set_processor_id(id)  do {                      \
+    csr_write(sscratch, __per_cpu_offset[id]);      \
+    this_cpu(cpu_id) = (id);                            \
+} while(0)
+
 #endif /* __ASSEMBLY__ */
 
 #endif /* __ASM_CURRENT_H */
