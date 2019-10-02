@@ -277,7 +277,7 @@ void *ioremap(paddr_t pa, size_t len)
     return ioremap_attr(pa, len, PAGE_HYPERVISOR_NOCACHE);
 }
 
-void gnttab_clear_flag(unsigned long nr, uint16_t *addr)
+void gnttab_clear_flags(struct domain *d, unsigned long nr, uint16_t *addr)
 {
     /*
      * Note that this cannot be clear_bit(), as the access must be
