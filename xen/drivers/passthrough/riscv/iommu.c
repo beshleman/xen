@@ -1,8 +1,10 @@
 /*
- * Generic IOMMU framework via the device tree
+ * IOMMU framework for RISC-V
  *
- * Julien Grall <julien.grall@linaro.org>
- * Copyright (c) 2014 Linaro Limited.
+ * Based off passthrough/arm/iommu.c
+ *
+ * Bobby Eshleman <bobby.eshleman@starlab.io>
+ * Copyright (c) 2019
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
