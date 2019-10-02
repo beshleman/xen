@@ -16,6 +16,7 @@ config RISCV_64
 config RISCV
 	def_bool y
 	select HAS_PDX
+	select HAS_PASSTHROUGH
 
 config ARCH_DEFCONFIG
 	string
