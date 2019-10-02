@@ -26,5 +26,10 @@
 #define _ASM_RISCV_MEM_ACCESS_H
 
 #include <xen/errno.h>
+/* vm_event and mem_access are supported on any ARM guest */
+static inline bool p2m_mem_access_sanity_check(struct domain *d)
+{
+    return true;
+}
 
 #endif /* _ASM_RISCV_MEM_ACCESS_H */
