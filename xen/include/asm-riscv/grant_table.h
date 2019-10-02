@@ -75,6 +75,9 @@ void gnttab_mark_dirty(struct domain *d, mfn_t mfn);
 #define gnttab_status_gmfn(d, t, i)                                      \
     gfn_x(((i) >= nr_status_frames(t)) ? INVALID_GFN : (t)->arch.status_gfn[i])
 
+#define gnttab_status_gfn(d, t, i)                                       \
+    (((i) >= nr_status_frames(t)) ? INVALID_GFN : (t)->arch.status_gfn[i])
+
 #define gnttab_need_iommu_mapping(d)                    \
     (is_domain_direct_mapped(d) && need_iommu_pt_sync(d))
 
