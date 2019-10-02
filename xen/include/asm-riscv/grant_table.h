@@ -14,7 +14,8 @@ struct grant_table_arch {
     gfn_t *status_gfn;
 };
 
-void gnttab_clear_flag(unsigned long nr, uint16_t *addr);
+void gnttab_clear_flags(struct domain *d,
+                        unsigned long nr, uint16_t *addr);
 int create_grant_host_mapping(unsigned long gpaddr, mfn_t mfn,
                               unsigned int flags, unsigned int cache_flags);
 #define gnttab_host_mapping_get_page_type(ro, ld, rd) (0)
@@ -65,15 +66,15 @@ void gnttab_mark_dirty(struct domain *d, mfn_t mfn);
     } while ( 0 )
 
 #define gnttab_get_frame_gfn(gt, st, idx) ({                             \
-   _gfn((st) ? gnttab_status_gmfn(NULL, gt, idx)                         \
-             : gnttab_shared_gmfn(NULL, gt, idx));                       \
+   (st) ? gnttab_status_gfn(NULL, gt, idx)                               \
+        : gnttab_shared_gfn(NULL, gt, idx);                              \
 })
 
-#define gnttab_shared_gmfn(d, t, i)                                      \
-    gfn_x(((i) >= nr_grant_frames(t)) ? INVALID_GFN : (t)->arch.shared_gfn[i])
+#define gnttab_shared_gfn(d, t, i)                                       \
+    (((i) >= nr_grant_frames(t)) ? INVALID_GFN : (t)->arch.shared_gfn[i])
 
-#define gnttab_status_gmfn(d, t, i)                                      \
-    gfn_x(((i) >= nr_status_frames(t)) ? INVALID_GFN : (t)->arch.status_gfn[i])
+#define gnttab_status_gfn(d, t, i)                                       \
+    (((i) >= nr_status_frames(t)) ? INVALID_GFN : (t)->arch.status_gfn[i])
 
 #define gnttab_status_gfn(d, t, i)                                       \
     (((i) >= nr_status_frames(t)) ? INVALID_GFN : (t)->arch.status_gfn[i])
