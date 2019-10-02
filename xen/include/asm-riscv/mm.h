@@ -130,8 +130,8 @@ extern vaddr_t xenheap_virt_start;
     (mfn_valid(_mfn(mfn)) && is_xen_heap_page(mfn_to_page(_mfn(mfn))))
 
 #define is_xen_fixed_mfn(mfn)                                   \
-    ((pfn_to_paddr(mfn) >= virt_to_maddr(&_start)) &&       \
-     (pfn_to_paddr(mfn) <= virt_to_maddr(&_end)))
+    ((mfn_to_maddr(mfn) >= virt_to_maddr(&_start)) &&       \
+     (mfn_to_maddr(mfn) <= virt_to_maddr(&_end)))
 
 #define page_get_owner(_p)    (_p)->v.inuse.domain
 #define page_set_owner(_p,_d) ((_p)->v.inuse.domain = (_d))
@@ -258,7 +258,7 @@ unsigned long domain_get_maximum_gpfn(struct domain *d);
 static inline
 int arch_acquire_resource(struct domain *d, unsigned int type, unsigned int id,
                           unsigned long frame, unsigned int nr_frames,
-                          xen_pfn_t mfn_list[], unsigned int *flags)
+                          xen_pfn_t mfn_list[])
 {
     return -EOPNOTSUPP;
 }
