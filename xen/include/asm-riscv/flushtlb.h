@@ -45,6 +45,21 @@ static inline void flush_all_guests_tlb(void)
 	/* TODO */
 }
 
+/*
+ * Flush entire local TLB.
+ */
+static inline void flush_local_tlb_all(void)
+{
+	asm volatile ("sfence.vma" : : : "memory");
+}
+
+/* Flush one page from local TLB */
+static inline void flush_local_tlb_page(unsigned long addr)
+{
+	asm volatile ("sfence.vma %0" : : "r" (addr) : "memory");
+}
+
+
 #endif /* __ASM_RISCV_FLUSHTLB_H__ */
 /*
  * Local variables:

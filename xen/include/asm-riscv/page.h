@@ -21,6 +21,7 @@
 #include <xen/const.h>
 #include <xen/config.h>
 #include <asm/riscv_encoding.h>
+#include <asm/asm.h>
 
 /*
  * PAGE_OFFSET -- the first address of the first page of memory.
@@ -34,7 +35,7 @@
 #define KERN_VIRT_SIZE (-PAGE_OFFSET)
 
 /* Taken from Xvisor */
-#define PGTBL_INITIAL_TABLE_COUNT           8
+#define PGTBL_INITIAL_TABLE_COUNT           10 
 #define PGTBL_TABLE_SIZE                0x00001000
 #define PGTBL_TABLE_SIZE_SHIFT              12
 #ifdef CONFIG_RISCV_64
@@ -121,6 +122,11 @@
 #define third_table_offset(va)  TABLE_OFFSET(third_linear_offset(va))
 #define zeroeth_table_offset(va)  TABLE_OFFSET(zeroeth_linear_offset(va))
 
+#define pgtbl_v0_index(va) zeroeth_linear_offset((va) & PGTBL_L0_INDEX_MASK)
+#define pgtbl_v1_index(va) first_linear_offset((va) & PGTBL_L1_INDEX_MASK)
+#define pgtbl_v2_index(va) second_linear_offset((va) & PGTBL_L2_INDEX_MASK)
+#define pgtbl_v3_index(va) third_linear_offset((va) & PGTBL_L3_INDEX_MASK)
+
 #ifndef __ASSEMBLY__
 
 #define PAGE_UP(addr)	(((addr)+((PAGE_SIZE)-1))&(~((PAGE_SIZE)-1)))
@@ -167,6 +173,16 @@
 #define PAGE_HYPERVISOR         PAGE_HYPERVISOR_RW
 #define PAGE_HYPERVISOR_NOCACHE (_PAGE_DEVICE)
 #define PAGE_HYPERVISOR_WC      (_PAGE_DEVICE)
+
+/* Note: we use 1/8th or 12.5% of VAPOOL memory as translation table pool.
+ * For example if VAPOOL is 8 MB then translation table pool will be 1 MB
+ * or 1 MB / 4 KB = 256 translation tables
+ */
+#define PGTBL_MAX_TABLE_COUNT 	(CONFIG_VAPOOL_SIZE_MB << \
+					(20 - 3 - PGTBL_TABLE_SIZE_SHIFT))
+
+#define PGTBL_MAX_TABLE_SIZE	(PGTBL_MAX_TABLE_COUNT * PGTBL_TABLE_SIZE)
+#define PGTBL_INITIAL_TABLE_SIZE (PGTBL_INITIAL_TABLE_COUNT * PGTBL_TABLE_SIZE)
 
 /* Invalidate all instruction caches in Inner Shareable domain to PoU */
 static inline void invalidate_icache(void)
@@ -290,6 +306,24 @@ static inline uint64_t va_to_par(vaddr_t va)
       [xlen_minus_16] "i" (__riscv_xlen - 16));
 
     return val;
+}
+
+/* Write a pagetable entry. */
+static inline void write_pte(pte_t *p, pte_t pte)
+{
+    /* Inspired from the ARMv7 function write_pte().
+     * Is sfence.vma the best fence to use here?
+     * Must all previous pagetbl instructions be ordered too?
+    asm volatile (
+        "sfence.vma;\n"
+        "sd %0 (%1);\n"
+        "sfence.vma %0;\n"
+        : : "r" (pte), "r" (p) : "memory");
+     */
+
+    asm volatile ("sfence.vma");
+    *p = pte;
+    asm volatile ("sfence.vma");
 }
 
 #endif /* _ASM_RISCV_PAGE_H */

@@ -40,9 +40,7 @@
 #include <xen/virtual_region.h>
 #include <xen/vmap.h>
 #include <xen/trace.h>
-#include <asm/page.h>
 #include <asm/current.h>
-#include <asm/setup.h>
 #include <asm/setup.h>
 #include <asm/page.h>
 #include <xsm/xsm.h>
@@ -55,17 +53,16 @@ struct cpu_mmu_entry_ctrl {
 	unsigned long pgtbl_base;
 };
 
-/* Note: we use 1/8th or 12.5% of VAPOOL memory as translation table pool.
- * For example if VAPOOL is 8 MB then translation table pool will be 1 MB
- * or 1 MB / 4 KB = 256 translation tables
- */
-#define PGTBL_MAX_TABLE_COUNT 	(CONFIG_VAPOOL_SIZE_MB << \
-					(20 - 3 - PGTBL_TABLE_SIZE_SHIFT))
-#define PGTBL_MAX_TABLE_SIZE	(PGTBL_MAX_TABLE_COUNT * PGTBL_TABLE_SIZE)
-#define PGTBL_INITIAL_TABLE_SIZE (PGTBL_INITIAL_TABLE_COUNT * PGTBL_TABLE_SIZE)
+/* This is a third level pgtbl, that gets used by the xen heap.
+Having it defined here allows us to easily map in machine frames
+*/
+
+/* TODO: do not hard code the page table size */
+u8 __attribute__ ((aligned(PGTBL_TABLE_SIZE))) heap_pgtbl[MB(32)] = { 0 };
 
 u8 __attribute__ ((aligned(PGTBL_TABLE_SIZE))) def_pgtbl[PGTBL_INITIAL_TABLE_SIZE] = { 0 };
 int def_pgtbl_tree[PGTBL_INITIAL_TABLE_COUNT];
+u32 gbl_pgtbl_cnt = 0;
 
 void __attribute__ ((section(".entry")))
     __setup_initial_pgtbl(struct cpu_mmu_entry_ctrl *entry,
@@ -251,6 +248,7 @@ void __attribute__ ((section(".entry")))
     _setup_initial_pgtbl(unsigned long load_start, unsigned long load_end,
 			 unsigned long exec_start, unsigned long exec_end)
 {
+	u32 *ptr_gbl_pgtbl_cnt;
 	u32 i;
 	struct cpu_mmu_entry_ctrl entry = { 0, 0, NULL, NULL, 0 };
 
@@ -298,4 +296,11 @@ void __attribute__ ((section(".entry")))
 	 * Note: This mapping is used at runtime
 	 */
 	__setup_initial_pgtbl(&entry, exec_start, exec_end, load_start, true);
+
+        /* Leave gbl_pgtbl_cnt with the most recent pgtbl_count,
+         * this is for adding to this pagetable later.
+         */
+        // gbl_pgtbl_cnt = entry.pgtbl_count;
+	ptr_gbl_pgtbl_cnt = (u32 *)to_load_pa((unsigned long)&gbl_pgtbl_cnt);
+        *ptr_gbl_pgtbl_cnt = entry.pgtbl_count;
 }

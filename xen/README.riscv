@@ -2,3 +2,8 @@ TODO
 ----
 
 * Support Device Tree and fix drivers/passthrough/riscv/iommu.c usage of device tree
+* Support Device Tree for ram usage
+* Both x86 and ARM use `consider_modules()` in setup_mm() to find pages that don't conflict with loaded modules, I omitted this for the time being due to complexity.
+* riscv/setup.c: No non-xenheap memory setup
+* write_pte() may be unnecessarily inefficient (to sfence.vma calls)
+* setup_mm(): Find the heap range programatically (is now hard-coded)

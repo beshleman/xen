@@ -2,6 +2,7 @@
 #define __ARCH_RISCV_MM__
 
 #include <xen/kernel.h>
+#include <xen/init.h>
 #include <asm/page.h>
 #include <asm/pgtable-bits.h>
 #include <public/xen.h>
@@ -273,6 +274,9 @@ static inline bool arch_mfn_in_directmap(unsigned long mfn)
 }
 
 void setup_pagetables(unsigned long boot_phys_offset);
+
+void __init setup_xenheap_mappings(unsigned long base_mfn,
+                                   unsigned long nr_mfns);
 
 #endif /*  __ARCH_RISCV_MM__ */
 /*
