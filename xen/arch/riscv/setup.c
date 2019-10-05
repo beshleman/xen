@@ -118,7 +118,7 @@ static void __init setup_mm(void)
      * by the rest of the system.  heap_end is the end of that range.
      * TODO: find this range programatically
      */
-    /* Hardcoded to be ~1.75GB below DRAM controller for QEMU/virt TODO: don't do this */
+    /* Hardcoded to allow ~1.75GB below DRAM controller for QEMU/virt TODO: don't do this */
     heap_end = 0x70000000;
 
     /* heap_end >> PAGE_SHIFT == The number of pages from 0 to the
@@ -139,6 +139,7 @@ static void __init setup_mm(void)
     /* TODO: Setup frame tables? Frame table covers all of RAM region, including holes */
        
     max_page = PFN_DOWN(ram_end);
+    setup_frametable_mappings(ram_start, ram_end);
 
     /* Add xenheap memory that was not already added to the boot
        allocator. */

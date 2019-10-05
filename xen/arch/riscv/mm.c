@@ -24,6 +24,8 @@
 #include <xen/sizes.h>
 #include <asm/setup.h>
 
+unsigned long frametable_virt_end __read_mostly;
+
 pte_t boot_pgtable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 pte_t boot_first[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 pte_t boot_first_id[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
@@ -406,7 +408,7 @@ static inline void point_entry_to_next_table(unsigned long *pgtbl, u32 index, un
     pgtbl[index] |= PGTBL_PTE_VALID_MASK;
 }
 
-void xen_pt_update_entry(unsigned long vaddr)
+void xen_pt_update_entry_to_addr(unsigned long vaddr, unsigned long paddr)
 {
     u32 index;
     unsigned long *next_pte;
@@ -457,7 +459,7 @@ void xen_pt_update_entry(unsigned long vaddr)
     /* If no entry found, then point it the target physical frame */
     if (!next_pte) {
             index = pgtbl_v0_index(vaddr);
-            pgtbl[index] = vaddr;
+            pgtbl[index] = paddr;
             pgtbl[index] = pgtbl[index] >> PGTBL_PAGE_SIZE_SHIFT;
             pgtbl[index] = pgtbl[index] << PGTBL_PTE_ADDR_SHIFT;
             pgtbl[index] |= PGTBL_PTE_EXECUTE_MASK;
@@ -467,34 +469,64 @@ void xen_pt_update_entry(unsigned long vaddr)
     }
 }
 
-static void __init load_heap_pgtbl(unsigned long virt_offset,
-                                   unsigned long base_paddr,
-                                   unsigned long nr_paddrs)
+void xen_pt_identity_map(unsigned long vaddr)
 {
-    unsigned long i;
-    unsigned long vaddr;
-
-    for (i=0; i<nr_paddrs; i = i + PAGE_SIZE) {
-        vaddr = virt_offset + i;
-        xen_pt_update_entry(vaddr);
-    }
+    xen_pt_update_entry_to_addr(vaddr, vaddr);
 }
 
-void __init setup_xenheap_mappings(unsigned long nr_frames)
+void __init setup_xenheap_mappings(unsigned long heap_start, unsigned long nr_frames)
 {
     unsigned long i;
     unsigned long vaddr;
+    unsigned long paddr = heap_start;
 
-    for (i=0; i<nr_paddrs; i = i + PAGE_SIZE) {
+    for (i=0; i<nr_frames; i = i + PAGE_SIZE) {
         vaddr =  i + XENHEAP_VIRT_START;
-        xen_pt_update_entry(vaddr);
+        paddr =  i + XENHEAP_VIRT_START;
+        xen_pt_update_entry_to_addr(vaddr, paddr);
     }
 
     /* Record where the xenheap is, for translation routines. */
     xenheap_virt_end = XENHEAP_VIRT_START + nr_frames * PAGE_SIZE;
-    xenheap_mfn_start = _mfn(base_paddr);
-    xenheap_mfn_end = _mfn(base_paddr + nr_frames);
+    xenheap_mfn_start = _mfn(heap_start);
+    xenheap_mfn_end = _mfn(heap_start + nr_frames);
 }
+
+/* Map a frame table to cover physical addresses ps through pe */
+void __init setup_frametable_mappings(paddr_t ps, paddr_t pe)
+{
+    unsigned long i;
+    unsigned long paddr, vaddr;
+    unsigned long nr_pdxs = mfn_to_pdx(mfn_add(maddr_to_mfn(pe), -1)) -
+                            mfn_to_pdx(maddr_to_mfn(ps)) + 1;
+    unsigned long frametable_size = nr_pdxs * sizeof(struct page_info);
+    mfn_t base_mfn;
+    const unsigned long mapping_size = frametable_size < MB(32) ? MB(2) : MB(32);
+
+    /* Round up to 2M or 32M boundary, as appropriate. */
+    frametable_size = ROUNDUP(frametable_size, mapping_size);
+    base_mfn = alloc_boot_pages(frametable_size >> PAGE_SHIFT, 32<<(20-12));
+    
+    for (i=0; i<nr_pdxs; i = i + PAGE_SIZE) {
+        vaddr =  i + XENHEAP_VIRT_START;
+        paddr =  base_mfn.mfn + XENHEAP_VIRT_START;
+        xen_pt_update_entry_to_addr(vaddr, paddr);
+    }
+
+/*
+    create_mappings(FRAMETABLE_VIRT_START, mfn_x(base_mfn),
+                    frametable_size >> PAGE_SHIFT);
+*/
+
+    memset(&frame_table[0], 0, nr_pdxs * sizeof(struct page_info));
+    memset(&frame_table[nr_pdxs], -1,
+           frametable_size - (nr_pdxs * sizeof(struct page_info)));
+
+    frametable_virt_end = FRAMETABLE_VIRT_START + (nr_pdxs * sizeof(struct page_info));
+}
+
+
+
 
 void setup_pagetables(unsigned long boot_phys_offset)
 {
