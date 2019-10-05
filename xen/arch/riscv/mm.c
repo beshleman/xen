@@ -417,6 +417,7 @@ void xen_pt_update_entry(unsigned long vaddr)
     next_pgtbl += (PGTBL_TABLE_ENTCNT * gbl_pgtbl_cnt);
 
     next_pte = level_two_offset(pgtbl, vaddr);
+    /* If no entry found, then allocate one */
     if (!next_pte) {
             index = pgtbl_v2_index(vaddr);
 
@@ -434,6 +435,7 @@ void xen_pt_update_entry(unsigned long vaddr)
     }
 
     next_pte = level_one_offset(pgtbl, vaddr);
+    /* If no entry found, then allocate one */
     if (!next_pte) {
             index = pgtbl_v1_index(vaddr);
 
@@ -451,116 +453,8 @@ void xen_pt_update_entry(unsigned long vaddr)
     }
 
     next_pte = level_zero_offset(pgtbl, vaddr);
-    if (!next_pte) {
-            index = pgtbl_v0_index(vaddr);
-            pgtbl[index] = vaddr;
-            pgtbl[index] = pgtbl[index] >> PGTBL_PAGE_SIZE_SHIFT;
-            pgtbl[index] = pgtbl[index] << PGTBL_PTE_ADDR_SHIFT;
-            pgtbl[index] |= PGTBL_PTE_EXECUTE_MASK;
-            pgtbl[index] |= PGTBL_PTE_WRITE_MASK;
-            pgtbl[index] |= PGTBL_PTE_READ_MASK;
-            pgtbl[index] |= PGTBL_PTE_VALID_MASK;
-    }
-}
 
-#if 0
-/* Create Xen's mappings of memory.
- * Base and virt must be mapping_size aligned.
- * second must be a contiguous set of second level page tables
- * covering the region starting at virt_offset. */
-static void __init create_mappings(unsigned long virt_offset,
-                                   unsigned long base_paddr,
-                                   unsigned long nr_paddrs)
-                                  
-{
-    unsigned long i, count;
-
-    count = nr_paddrs / PGTBL_TABLE_ENTCNT;
-
-    for (i = 0; i < count; i++)
-    {
-        ///xen_pt_update_entry(unsigned long vaddr)
-        //write_pte(p + i, pte);
-    }
-
-    /* TODO: No TLB flush is necessary because write_pte() performs a TLB flush per entry,
-     * Is this necessary?  Should the entries be written as a group and then the TLB flushed after?
-     */
-
-#if 0
-    unsigned long i, count;
-    const unsigned long granularity = mapping_size >> PAGE_SHIFT;
-    pte_t pte, *p;
-
-    ASSERT((mapping_size == MB(2)) || (mapping_size == MB(32)));
-    ASSERT(!((virt_offset >> PAGE_SHIFT) % granularity));
-    ASSERT(!(base_mfn % granularity));
-    ASSERT(!(nr_mfns % granularity));
-    
-
-    count = nr_mfns / PGTBL_TABLE_ENTCNT;
-    p = second + second_linear_offset(virt_offset);
-    pte = mfn_to_xen_entry(_mfn(base_mfn), MT_NORMAL);
-    for ( i = 0; i < count; i++ )
-    {
-        xen_pt_update_entry(unsigned long vaddr)
-        write_pte(p + i, pte);
-    }
-    /* TODO: No TLB flush is necessary because write_pte() performs a TLB flush per entry,
-     * Is this necessary?  Should the entries be written as a group and then the TLB flushed after?
-     */
-#endif
-}
-#endif
-
-extern u8 heap_pgtbl[];
-static int heap_pgtbl_cnt = 0;
-
-void xen_heap_pt_update_entry(unsigned long vaddr)
-{
-    u32 index;
-    unsigned long *next_pte;
-    unsigned long *base = (unsigned long*) &heap_pgtbl_cnt;
-    unsigned long *pgtbl = base;
-    unsigned long *next_pgtbl = base;
-
-    next_pgtbl += heap_pgtbl_cnt * PGTBL_TABLE_ENTCNT;
-
-    next_pte = level_two_offset(pgtbl, vaddr);
-    if (!next_pte) {
-            index = pgtbl_v2_index(vaddr);
-
-            /* Point pgtbl[v2] to the next page table */
-            point_entry_to_next_table(pgtbl, index, next_pgtbl);
-            
-            /* Advance the pointer to the next table */
-            pgtbl = next_pgtbl;
-
-            /* Advance the next_pgtbl pointer to the next table */
-            next_pgtbl += PGTBL_TABLE_ENTCNT;
-            gbl_pgtbl_cnt++;
-    } else {
-        pgtbl = next_pte;
-    }
-
-    next_pte = level_one_offset(pgtbl, vaddr);
-    if (!next_pte) {
-            index = pgtbl_v1_index(vaddr);
-
-            /* Point pgtbl[v1] to the next page table */
-            point_entry_to_next_table(pgtbl, index, next_pgtbl);
-            
-            /* Advance the pointer to the next table */
-            pgtbl = next_pgtbl;
-
-            /* Advance the next_pgtbl pointer to the next table */
-            next_pgtbl += PGTBL_TABLE_ENTCNT;
-            gbl_pgtbl_cnt++;
-    } else {
-        pgtbl = next_pte;
-    }
-
-    next_pte = level_zero_offset(pgtbl, vaddr);
+    /* If no entry found, then point it the target physical frame */
     if (!next_pte) {
             index = pgtbl_v0_index(vaddr);
             pgtbl[index] = vaddr;
@@ -580,24 +474,26 @@ static void __init load_heap_pgtbl(unsigned long virt_offset,
     unsigned long i;
     unsigned long vaddr;
 
-    for (i=0; i<nr_paddrs; i = i + PGTBL_TABLE_ENTCNT) {
+    for (i=0; i<nr_paddrs; i = i + PAGE_SIZE) {
         vaddr = virt_offset + i;
-        xen_heap_pt_update_entry(vaddr);
+        xen_pt_update_entry(vaddr);
     }
 }
 
-void __init setup_xenheap_mappings(unsigned long base_paddr,
-                                   unsigned long nr_frames)
+void __init setup_xenheap_mappings(unsigned long nr_frames)
 {
-    load_heap_pgtbl(XENHEAP_VIRT_START, base_paddr, nr_frames);
+    unsigned long i;
+    unsigned long vaddr;
+
+    for (i=0; i<nr_paddrs; i = i + PAGE_SIZE) {
+        vaddr =  i + XENHEAP_VIRT_START;
+        xen_pt_update_entry(vaddr);
+    }
 
     /* Record where the xenheap is, for translation routines. */
-    //xenheap_virt_end = XENHEAP_VIRT_START + nr_frames * PAGE_SIZE;
-
-    /* TODO: convert to mfn_t */
-    //xenheap_mfn_start = _mfn(base_paddr);
-    /* TODO: convert to mfn_t */
-    //xenheap_mfn_end = _mfn(base_paddr + nr_paddr);
+    xenheap_virt_end = XENHEAP_VIRT_START + nr_frames * PAGE_SIZE;
+    xenheap_mfn_start = _mfn(base_paddr);
+    xenheap_mfn_end = _mfn(base_paddr + nr_frames);
 }
 
 void setup_pagetables(unsigned long boot_phys_offset)

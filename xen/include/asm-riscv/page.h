@@ -35,7 +35,7 @@
 #define KERN_VIRT_SIZE (-PAGE_OFFSET)
 
 /* Taken from Xvisor */
-#define PGTBL_INITIAL_TABLE_COUNT           10 
+#define PGTBL_INITIAL_TABLE_COUNT           8 
 #define PGTBL_TABLE_SIZE                0x00001000
 #define PGTBL_TABLE_SIZE_SHIFT              12
 #ifdef CONFIG_RISCV_64

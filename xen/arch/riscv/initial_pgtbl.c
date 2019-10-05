@@ -53,13 +53,6 @@ struct cpu_mmu_entry_ctrl {
 	unsigned long pgtbl_base;
 };
 
-/* This is a third level pgtbl, that gets used by the xen heap.
-Having it defined here allows us to easily map in machine frames
-*/
-
-/* TODO: do not hard code the page table size */
-u8 __attribute__ ((aligned(PGTBL_TABLE_SIZE))) heap_pgtbl[MB(32)] = { 0 };
-
 u8 __attribute__ ((aligned(PGTBL_TABLE_SIZE))) def_pgtbl[PGTBL_INITIAL_TABLE_SIZE] = { 0 };
 int def_pgtbl_tree[PGTBL_INITIAL_TABLE_COUNT];
 u32 gbl_pgtbl_cnt = 0;
