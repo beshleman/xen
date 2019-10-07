@@ -6,4 +6,4 @@ TODO
 * Both x86 and ARM use `consider_modules()` in setup_mm() to find pages that don't conflict with loaded modules, I omitted this for the time being due to complexity.
 * riscv/setup.c: No non-xenheap memory setup
 * write_pte() may be unnecessarily inefficient (to sfence.vma calls)
-* setup_mm(): Find the heap range programatically (is now hard-coded)
+* setup_mm(): Find the heap range programatically (is now hard-coded) * asm-riscv/mm.h: pfn_to_paddr() is a correct frame number to address conversion according to the spec, but I thought that pfn was a legacy synonym for mfn, which is not the same as a real frame number?  True? If so, 'tis not confusing?

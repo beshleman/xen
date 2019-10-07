@@ -182,8 +182,9 @@ static inline paddr_t __virt_to_maddr(vaddr_t va)
 
 static inline void *maddr_to_virt(paddr_t ma)
 {
-    return (void *)(XENHEAP_VIRT_START -
-                    mfn_to_maddr(xenheap_mfn_start) +
+    unsigned long frame_number = XENHEAP_VIRT_START - mfn_to_maddr(xenheap_mfn_start);
+                    
+    return (void *)(frame_number + 
                     ((ma & ma_va_bottom_mask) |
                      ((ma & ma_top_mask) >> pfn_pdx_hole_shift)));
 }
@@ -279,6 +280,8 @@ void __init setup_xenheap_mappings(unsigned long base_mfn,
                                    unsigned long nr_mfns);
 
 void __init setup_frametable_mappings(paddr_t ps, paddr_t pe);
+
+void __init map_more_boot_pages(void);
 
 #endif /*  __ARCH_RISCV_MM__ */
 /*

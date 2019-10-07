@@ -36,10 +36,16 @@ mfn_t xenheap_mfn_end __read_mostly;
 vaddr_t xenheap_virt_end __read_mostly;
 vaddr_t xenheap_virt_start __read_mostly;
 
-pte_t xen_pgtable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
-pte_t xen_second[PAGE_ENTRIES * 2] __attribute__((__aligned__(4096*2)));
-static pte_t xen_xenmap[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
+/*
+ * xen_second_pagetable is indexed with the VPN[2] page table entry field
+ * xen_first_pagetable is accessed from the VPN[1] page table entry field
+ * xen_zeroeth_pagetable is accessed from the VPN[0] page table entry field
+ */
+pte_t xen_second_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
+pte_t xen_first_pagetable[PAGE_ENTRIES * 2] __attribute__((__aligned__(4096*2)));
+static pte_t xen_zeroeth_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 
+/* This needs to be set by the address at which the bootloade has loaded Xen */
 static paddr_t phys_offset;
 
 unsigned long max_page;
@@ -364,7 +370,7 @@ extern u32 gbl_pgtbl_cnt;
 
 static inline unsigned long *level_two_offset(unsigned long *pgtbl, unsigned long vaddr)
 {
-    u32 index = pgtbl_v2_index(vaddr);
+    u32 index = pgtbl_second_index(vaddr);
 
     if (!(pgtbl[index] & PGTBL_PTE_VALID_MASK)) {
         return NULL;
@@ -375,7 +381,7 @@ static inline unsigned long *level_two_offset(unsigned long *pgtbl, unsigned lon
 
 static inline unsigned long *level_one_offset(unsigned long *pgtbl, unsigned long vaddr)
 {
-    u32 index = pgtbl_v1_index(vaddr);
+    u32 index = pgtbl_first_index(vaddr);
 
     if (!(pgtbl[index] & PGTBL_PTE_VALID_MASK)) {
         return NULL;
@@ -386,7 +392,7 @@ static inline unsigned long *level_one_offset(unsigned long *pgtbl, unsigned lon
 
 static inline unsigned long *level_zero_offset(unsigned long *pgtbl, unsigned long vaddr)
 {
-    u32 index = pgtbl_v0_index(vaddr);
+    u32 index = pgtbl_zeroeth_index(vaddr);
 
     if (!(pgtbl[index] & PGTBL_PTE_VALID_MASK)) {
         return NULL;
@@ -421,7 +427,11 @@ void xen_pt_update_entry_to_addr(unsigned long vaddr, unsigned long paddr)
     next_pte = level_two_offset(pgtbl, vaddr);
     /* If no entry found, then allocate one */
     if (!next_pte) {
-            index = pgtbl_v2_index(vaddr);
+            if (gbl_pgtbl_cnt >= PGTBL_INITIAL_TABLE_COUNT) {
+                    while (1) ;	/* No initial table available */
+            }
+
+            index = pgtbl_second_index(vaddr);
 
             /* Point pgtbl[v2] to the next page table */
             point_entry_to_next_table(pgtbl, index, next_pgtbl);
@@ -432,6 +442,7 @@ void xen_pt_update_entry_to_addr(unsigned long vaddr, unsigned long paddr)
             /* Advance the next_pgtbl pointer to the next table */
             next_pgtbl += PGTBL_TABLE_ENTCNT;
             gbl_pgtbl_cnt++;
+
     } else {
         pgtbl = next_pte;
     }
@@ -439,7 +450,10 @@ void xen_pt_update_entry_to_addr(unsigned long vaddr, unsigned long paddr)
     next_pte = level_one_offset(pgtbl, vaddr);
     /* If no entry found, then allocate one */
     if (!next_pte) {
-            index = pgtbl_v1_index(vaddr);
+            if (gbl_pgtbl_cnt >= PGTBL_INITIAL_TABLE_COUNT) {
+                    while (1) ;	/* No initial table available */
+            }
+            index = pgtbl_first_index(vaddr);
 
             /* Point pgtbl[v1] to the next page table */
             point_entry_to_next_table(pgtbl, index, next_pgtbl);
@@ -458,7 +472,7 @@ void xen_pt_update_entry_to_addr(unsigned long vaddr, unsigned long paddr)
 
     /* If no entry found, then point it the target physical frame */
     if (!next_pte) {
-            index = pgtbl_v0_index(vaddr);
+            index = pgtbl_zeroeth_index(vaddr);
             pgtbl[index] = paddr;
             pgtbl[index] = pgtbl[index] >> PGTBL_PAGE_SIZE_SHIFT;
             pgtbl[index] = pgtbl[index] << PGTBL_PTE_ADDR_SHIFT;
@@ -477,19 +491,22 @@ void xen_pt_identity_map(unsigned long vaddr)
 void __init setup_xenheap_mappings(unsigned long heap_start, unsigned long nr_frames)
 {
     unsigned long i;
-    unsigned long vaddr;
+    unsigned long vaddr = 0;
     unsigned long paddr = heap_start;
 
-    for (i=0; i<nr_frames; i = i + PAGE_SIZE) {
-        vaddr =  i + XENHEAP_VIRT_START;
-        paddr =  i + XENHEAP_VIRT_START;
+    for (i=0; i<nr_frames; i++) {
+        vaddr =  (i << PAGE_SHIFT) + XENHEAP_VIRT_START;
+        paddr +=  i << PAGE_SHIFT;
+        vaddr = paddr + XENHEAP_VIRT_START;
         xen_pt_update_entry_to_addr(vaddr, paddr);
     }
 
+    BUG_ON(vaddr == 0);
+
     /* Record where the xenheap is, for translation routines. */
-    xenheap_virt_end = XENHEAP_VIRT_START + nr_frames * PAGE_SIZE;
-    xenheap_mfn_start = _mfn(heap_start);
-    xenheap_mfn_end = _mfn(heap_start + nr_frames);
+    xenheap_virt_end = vaddr;
+    xenheap_mfn_start = _mfn(heap_start >> PAGE_SHIFT);
+    xenheap_mfn_end = _mfn(paddr >> PAGE_SHIFT);
 }
 
 /* Map a frame table to cover physical addresses ps through pe */
@@ -525,30 +542,85 @@ void __init setup_frametable_mappings(paddr_t ps, paddr_t pe)
     frametable_virt_end = FRAMETABLE_VIRT_START + (nr_pdxs * sizeof(struct page_info));
 }
 
-
-
-
-void setup_pagetables(unsigned long boot_phys_offset)
+/**
+ * Build the page tables up starting with the zeroeth table, then the first, then second.
+ * The zeroeth table will hold the physical frame numbers point to the Xen executable.
+ */
+void __init setup_pagetables(unsigned long boot_phys_offset)
 {
-    pte_t *p, pte;
+    pte_t *p;
+    unsigned long pte;
+    unsigned long vaddr;
     int i;
 
     phys_offset = boot_phys_offset;
 
-    p = (void *) xen_pgtable;
 
-    /* Initialise first level entries, to point to second level entries */
-    for ( i = 0; i < 2; i++)
+    p = xen_zeroeth_pagetable;
+
+    /* Map the entire xen_zeroeth_table to the first PAGE_ENTRIES frames
+     * of the Xen executable.
+     */
+    for (i = 0; i < PAGE_ENTRIES; i++)
     {
-        p[i] = pte_of_xenaddr((uintptr_t)(xen_second + i * PAGE_ENTRIES));
+        vaddr = XEN_VIRT_START + (i << PAGE_SHIFT);
+        //vaddr += boot_phys_offset;
+
+#if 0
+        if ( !is_kernel(vaddr) )
+            break;
+#endif
+
+        /* TODO: protect with correct perms */
+        vaddr >>= PGTBL_PAGE_SIZE_SHIFT;
+        vaddr <<= PGTBL_PTE_ADDR_SHIFT;
+        vaddr |= PGTBL_PTE_EXECUTE_MASK;
+        vaddr |= PGTBL_PTE_WRITE_MASK;
+        vaddr |= PGTBL_PTE_READ_MASK;
+        vaddr |= PGTBL_PTE_VALID_MASK;
+
+        xen_zeroeth_pagetable[i].pte = vaddr;
     }
 
-    pte = pte_of_xenaddr((vaddr_t)xen_xenmap);
-    xen_second[second_table_offset(XEN_VIRT_START)] = pte;
+    /* Point from the first level to the zeroeth level */
+    pte = (unsigned long) &xen_zeroeth_pagetable[0];
+    pte >>= PGTBL_PAGE_SIZE_SHIFT;
+    pte <<= PGTBL_PTE_ADDR_SHIFT;
+    pte |= PGTBL_PTE_VALID_MASK;
+    /* Flags set to R=0, W=0, E=0 means this pte points to the next pgtbl */
+    pte &= ~PGTBL_PTE_PERM_MASK;
+    xen_first_pagetable[pgtbl_first_index(XEN_VIRT_START)].pte = pte;
+
+    /* Point from the second level to the first level */
+    pte = (unsigned long) &xen_first_pagetable[0];
+    pte >>= PGTBL_PAGE_SIZE_SHIFT;
+    pte <<= PGTBL_PTE_ADDR_SHIFT;
+    pte |= PGTBL_PTE_VALID_MASK;
+    /* Flags set to R=0, W=0, E=0 means this pte points to the next pgtbl */
+    pte &= ~PGTBL_PTE_PERM_MASK;
+    xen_second_pagetable[pgtbl_second_index(XEN_VIRT_START)].pte = pte;
 
     __asm__ __volatile("sfence.vma");
 
-    csr_write(satp, ((xen_pgtable->pte + boot_phys_offset) >> PAGE_SHIFT) | SATP_MODE);
+    csr_write(satp, (((unsigned long)&xen_second_pagetable[0]) >> PAGE_SHIFT) | SATP_MODE);
+}
+
+/* TODO: remove me and dynamically discover reserved boot space */
+void __init map_more_boot_pages(void)
+{
+    unsigned long i;
+
+    /* Hardcode the space between VIRT_TEST and VIRT_CLINT:
+     * TODO: don't do this */
+    unsigned long start = 0x110000;
+    unsigned long end = 0x2000000;
+
+    for (i=start; i<end; i += PAGE_SIZE) {
+        xen_pt_update_entry_to_addr(i + XENHEAP_VIRT_START, i);
+    }
+
+    /* use unreserved space as boot alloc pages */
+    init_boot_pages(start, end);
 }
 
 /*

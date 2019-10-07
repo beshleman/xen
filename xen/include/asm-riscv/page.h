@@ -30,19 +30,20 @@
  */
 #define PAGE_OFFSET		_AC(CONFIG_PAGE_OFFSET, UL)
 
-#define PAGE_ENTRIES    1024
 
 #define KERN_VIRT_SIZE (-PAGE_OFFSET)
 
 /* Taken from Xvisor */
-#define PGTBL_INITIAL_TABLE_COUNT           8 
+#define PGTBL_INITIAL_TABLE_COUNT           2000 
 #define PGTBL_TABLE_SIZE                0x00001000
 #define PGTBL_TABLE_SIZE_SHIFT              12
 #ifdef CONFIG_RISCV_64
 #define PGTBL_TABLE_ENTCNT              512
+#define PAGE_ENTRIES                    512
 #define PGTBL_TABLE_ENTSZ               8
 #else
 #define PGTBL_TABLE_ENTCNT              1024
+#define PAGE_ENTRIES                    1024
 #define PGTBL_TABLE_ENTSZ               4
 #endif
 #define PGTBL_PAGE_SIZE                 0x00001000
@@ -117,15 +118,15 @@
 #define third_linear_offset(va) ((va) >> PGTBL_L3_INDEX_SHIFT)
 
 #define TABLE_OFFSET(offs) ((unsigned int)(offs) & PGTBL_PTE_ADDR_MASK)
+#define zeroeth_table_offset(va)  TABLE_OFFSET(zeroeth_linear_offset(va))
 #define first_table_offset(va)  TABLE_OFFSET(first_linear_offset(va))
 #define second_table_offset(va) TABLE_OFFSET(second_linear_offset(va))
 #define third_table_offset(va)  TABLE_OFFSET(third_linear_offset(va))
-#define zeroeth_table_offset(va)  TABLE_OFFSET(zeroeth_linear_offset(va))
 
-#define pgtbl_v0_index(va) zeroeth_linear_offset((va) & PGTBL_L0_INDEX_MASK)
-#define pgtbl_v1_index(va) first_linear_offset((va) & PGTBL_L1_INDEX_MASK)
-#define pgtbl_v2_index(va) second_linear_offset((va) & PGTBL_L2_INDEX_MASK)
-#define pgtbl_v3_index(va) third_linear_offset((va) & PGTBL_L3_INDEX_MASK)
+#define pgtbl_zeroeth_index(va) zeroeth_linear_offset((va) & PGTBL_L0_INDEX_MASK)
+#define pgtbl_first_index(va) first_linear_offset((va) & PGTBL_L1_INDEX_MASK)
+#define pgtbl_second_index(va) second_linear_offset((va) & PGTBL_L2_INDEX_MASK)
+#define pgtbl_third_index(va) third_linear_offset((va) & PGTBL_L3_INDEX_MASK)
 
 #ifndef __ASSEMBLY__
 

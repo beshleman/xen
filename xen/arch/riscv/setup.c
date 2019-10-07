@@ -39,7 +39,6 @@
 #include <asm/page.h>
 #include <asm/current.h>
 #include <asm/setup.h>
-#include <asm/setup.h>
 #include <xsm/xsm.h>
 
 /* The lucky hart to first increment this variable will boot the other cores */
@@ -61,7 +60,6 @@ void arch_get_xen_caps(xen_capabilities_info_t *info)
 static void __init setup_mm(void)
 {
     paddr_t ram_start, ram_end, ram_size;
-    unsigned long heap_end;
     unsigned long heap_start;
     unsigned long ram_pages;
     unsigned long heap_pages, xenheap_pages, domheap_pages;
@@ -87,13 +85,21 @@ static void __init setup_mm(void)
         [VIRT_PCIE_PIO] =    { 0x03000000,    0x00010000 },
         [VIRT_PCIE_ECAM] =   { 0x30000000,    0x10000000 },};
     */
+    /* These values are hardcoded for the riscv-virt QEMU device */
     /* How much ram do we have? */
-    ram_start = 0x0; /* TODO: extract from fdt*/
-    ram_size  = 0x80000000UL; /* TODO: extract from fdt */
+    ram_start = 0x80000000UL; /* TODO: extract from fdt*/
+    ram_size  = 0x8000000UL; /* TODO: extract from fdt */
     ram_end   = ram_start + ram_size;
 
     /* How many pages of ram? */
     total_pages = ram_pages = ram_size >> PAGE_SHIFT;
+
+    /* What size of heap? */
+    /* TODO: derive heap sizes from dtb */
+    /* Hardcoded 64MB for total heap, half to xen half to dom */
+    heap_pages = ram_pages;
+    xenheap_pages = heap_pages / 2;
+    domheap_pages = heap_pages / 2;
 
     /* Comments from ARM's setup.c ...
      *
@@ -108,23 +114,15 @@ static void __init setup_mm(void)
      * We try to allocate the largest xenheap possible within these
      * constraints.
      */
-    heap_pages = ram_pages;
     xenheap_pages = (heap_pages/32 + 0x1fffUL) & ~0x1fffUL;
     xenheap_pages = max(xenheap_pages, 32UL<<(20-PAGE_SHIFT));
     xenheap_pages = min(xenheap_pages, 1UL<<(30-PAGE_SHIFT));
-    domheap_pages = heap_pages - xenheap_pages;
-
-    /* Find a range of memory that is the size of the heap and does not contain memory used
-     * by the rest of the system.  heap_end is the end of that range.
-     * TODO: find this range programatically
+    /* Where to place heap? */
+    /* TODO: Find a range of memory that is the size of the heap and does
+     * not contain memory used by any other part of the system.
      */
-    /* Hardcoded to allow ~1.75GB below DRAM controller for QEMU/virt TODO: don't do this */
-    heap_end = 0x70000000;
 
-    /* heap_end >> PAGE_SHIFT == The number of pages from 0 to the
-     * paddr(heap_end) 
-     */
-    heap_start = heap_end - (xenheap_pages << PAGE_SHIFT);
+    heap_start = ram_end - (xenheap_pages << PAGE_SHIFT);
     setup_xenheap_mappings(heap_start, xenheap_pages);
 
     /*
@@ -135,11 +133,11 @@ static void __init setup_mm(void)
 
     init_boot_pages(pfn_to_paddr(boot_mfn_start), pfn_to_paddr(boot_mfn_end));
 
-    /* TODO: Add non-xenheap memory */
-    /* TODO: Setup frame tables? Frame table covers all of RAM region, including holes */
-       
+    /* TODO: Add non-xenheap memory, use dt for unreserved space */
+    map_more_boot_pages();
+
     max_page = PFN_DOWN(ram_end);
-    setup_frametable_mappings(ram_start, ram_end);
+    setup_frametable_mappings(0, 0x80000000UL);
 
     /* Add xenheap memory that was not already added to the boot
        allocator. */
@@ -155,10 +153,11 @@ void __init start_xen(void)
         .stop_bits = 1
     };
 
+    setup_pagetables(0x80200000);
 
+    setup_virtual_regions(NULL, NULL);
     setup_mm();
     vm_init();
-    // setup_pagetables(0x80200000);
 
     ns16550.io_base = 0x10000000;
     ns16550.irq     = 10;
