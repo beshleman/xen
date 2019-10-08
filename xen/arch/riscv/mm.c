@@ -24,6 +24,7 @@
 #include <xen/sizes.h>
 #include <asm/setup.h>
 
+/* TODO: remove these if they're not needed */
 pte_t boot_pgtable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 pte_t boot_first[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 pte_t boot_first_id[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
@@ -34,12 +35,28 @@ mfn_t xenheap_mfn_end __read_mostly;
 vaddr_t xenheap_virt_end __read_mostly;
 vaddr_t xenheap_virt_start __read_mostly;
 
-pte_t xen_pgtable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
-pte_t xen_second[PAGE_ENTRIES * 2] __attribute__((__aligned__(4096*2)));
-static pte_t xen_xenmap[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
+/*
+ * xen_second_pagetable is indexed with the VPN[2] page table entry field
+ * xen_first_pagetable is accessed from the VPN[1] page table entry field
+ * xen_zeroeth_pagetable is accessed from the VPN[0] page table entry field
+ */
+unsigned long xen_second_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
+static unsigned long xen_first_pagetable[PAGE_ENTRIES * 2] __attribute__((__aligned__(4096*2)));
+static unsigned long xen_zeroeth_pagetable[PAGE_ENTRIES * 5] __attribute__((__aligned__(4096)));
+
+/* Used by _setup_initial_pagetables() */
+extern unsigned long _text_start;
+extern unsigned long _text_end;
+extern unsigned long _cpuinit_start;
+extern unsigned long _cpuinit_end;
+extern unsigned long _spinlock_start;
+extern unsigned long _spinlock_end;
+extern unsigned long _init_start;
+extern unsigned long _init_end;
+extern unsigned long _rodata_start;
+extern unsigned long _rodata_end;
 
 static paddr_t phys_offset;
-
 unsigned long max_page;
 unsigned long total_pages;
 
@@ -349,25 +366,173 @@ unsigned long get_upper_mfn_bound(void)
 
 void setup_pagetables(unsigned long boot_phys_offset)
 {
-    pte_t *p, pte;
-    int i;
+    (void) boot_phys_offset;
 
-    phys_offset = boot_phys_offset;
+    /* TODO */
+}
 
-    p = (void *) xen_pgtable;
+void __init clear_pagetables(unsigned long load_addr, unsigned long linker_addr)
+{
+    unsigned long *p;
+    unsigned long page;
+    unsigned long i;
 
-    /* Initialise first level entries, to point to second level entries */
-    for ( i = 0; i < 2; i++)
-    {
-        p[i] = pte_of_xenaddr((uintptr_t)(xen_second + i * PAGE_ENTRIES));
+    page = (unsigned long)&xen_second_pagetable[0];
+    p = (unsigned long *)(page + load_addr - linker_addr);
+    for (i=0; i<ARRAY_SIZE(xen_second_pagetable); i++) {
+        p[i] = 0ULL;
     }
 
-    pte = pte_of_xenaddr((vaddr_t)xen_xenmap);
-    xen_second[second_table_offset(XEN_VIRT_START)] = pte;
+    page = (unsigned long)&xen_first_pagetable[0];
+    p = (unsigned long *)(page + load_addr - linker_addr);
+    for (i=0; i<ARRAY_SIZE(xen_first_pagetable); i++) {
+        p[i] = 0ULL;
+    }
 
-    __asm__ __volatile("sfence.vma");
+    page = (unsigned long)&xen_zeroeth_pagetable[0];
+    p = (unsigned long *)(page + load_addr - linker_addr);
+    for (i=0; i<ARRAY_SIZE(xen_zeroeth_pagetable); i++) {
+        p[i] = 0ULL;
+    }
+}
 
-    csr_write(satp, ((xen_pgtable->pte + boot_phys_offset) >> PAGE_SHIFT) | SATP_MODE);
+void __attribute__ ((section(".entry")))
+setup_initial_pagetables(unsigned long *second,
+                         unsigned long *first,
+                         unsigned long *zeroeth,
+                         unsigned long map_start,
+                         unsigned long map_end,
+                         unsigned long pa_start) {
+    unsigned long page_addr;
+    unsigned long index2;
+    unsigned long index1;
+    unsigned long index0;
+
+    /* align start addresses */
+    map_start &= PGTBL_L0_MAP_MASK;
+    pa_start &= PGTBL_L0_MAP_MASK;
+
+    page_addr = map_start;
+    while (page_addr < map_end) {
+        index2 = (page_addr & PGTBL_L2_INDEX_MASK) >> PGTBL_L2_INDEX_SHIFT;
+        index1 = (page_addr & PGTBL_L1_INDEX_MASK) >> PGTBL_L1_INDEX_SHIFT;
+        index0 = (page_addr & PGTBL_L0_INDEX_MASK) >> PGTBL_L0_INDEX_SHIFT;
+
+        /* Setup level2 table */
+        second[index2] = (unsigned long) &first[index1];
+        second[index2] = second[index2] >> PGTBL_PAGE_SIZE_SHIFT;
+        second[index2] = second[index2] << PGTBL_PTE_ADDR_SHIFT;
+        second[index2] |= PGTBL_PTE_VALID_MASK;
+
+        /* Setup level1 table */
+        first[index1] = (unsigned long) &zeroeth[index0];
+        first[index1] = first[index1] >> PGTBL_PAGE_SIZE_SHIFT;
+        first[index1] = first[index1] << PGTBL_PTE_ADDR_SHIFT;
+        first[index1] |= PGTBL_PTE_VALID_MASK;
+
+        /* Setup level0 table */
+        if (!(zeroeth[index0] & PGTBL_PTE_VALID_MASK)) {
+                /* Update level0 table */
+                zeroeth[index0] = (page_addr - map_start) + pa_start;
+                zeroeth[index0] = zeroeth[index0] >> PGTBL_PAGE_SIZE_SHIFT;
+                zeroeth[index0] = zeroeth[index0] << PGTBL_PTE_ADDR_SHIFT;
+                zeroeth[index0] |= PGTBL_PTE_EXECUTE_MASK;
+                zeroeth[index0] |= PGTBL_PTE_WRITE_MASK;
+                zeroeth[index0] |= PGTBL_PTE_READ_MASK;
+                zeroeth[index0] |= PGTBL_PTE_VALID_MASK;
+        }
+
+        /* Point to next page */
+        page_addr += PGTBL_L0_BLOCK_SIZE;
+    }
+}
+
+/* Note: load_addr() and linker_addr() are to be called only when the MMU is disabled 
+ * and only when executing from the primary CPU.
+ *
+ * Note: This functions cannot refer to any global variable &
+ * functions to ensure that it can execute from anywhere.
+ */
+
+/* Convert an addressed layed out at link time to the address where it was loaded
+ * by the bootloader.
+ */
+#define load_addr(linker_address)	({ \
+			unsigned long __linker_address = (unsigned long) (linker_address); \
+			if (linker_addr_start <= __linker_address && __linker_address < linker_addr_end) { \
+				__linker_address = __linker_address - linker_addr_start + load_addr_start; \
+			} \
+			__linker_address; \
+			})
+
+/* Convert boot-time Xen address from where it was loaded by the boot loader to the address it was layed out
+ * at link-time.
+ */
+#define linker_addr(load_address)       ({ \
+			unsigned long __load_address = (unsigned long) (load_address); \
+			if (load_addr_start <= __load_address && __load_address < load_addr_end) { \
+				__load_address = __load_address - load_addr_start + linker_addr_start; \
+			} \
+			__load_address; \
+			})
+
+/*
+ * 1) Build the page tables for Xen that map the following:
+ *   1.1)  The physical location of Xen (where the bootloader loaded it)
+ *   1.2)  The link-time location of Xen (where linker expected Xen's
+ *         addresses to be)
+ * 2) Load the page table into the SATP and enable the MMU
+ */
+void __attribute__ ((section(".entry")))
+    _setup_initial_pagetables(unsigned long load_addr_start, unsigned long load_addr_end,
+			 unsigned long linker_addr_start, unsigned long linker_addr_end)
+{
+    unsigned long *second;
+    unsigned long *first;
+    unsigned long *zeroeth;
+
+    clear_pagetables(load_addr_start, linker_addr_start);
+
+    /* Get the addresses where the page tables were loaded */
+    second = (unsigned long *)load_addr(&xen_second_pagetable);
+    first = (unsigned long *)load_addr(&xen_first_pagetable);
+    zeroeth = (unsigned long *)load_addr(&xen_zeroeth_pagetable);
+
+    /* Create a mapping of the load time address range to... the load time address range.
+     * This mapping is used at boot time only.
+     */
+    setup_initial_pagetables(second, first, zeroeth, load_addr_start, load_addr_end, load_addr_start);
+
+    /* Create a mapping of all of Xen's link-time addresses to where they were actually loaded.
+     * This mapping is used at runtime.
+     */
+    setup_initial_pagetables(second, first, zeroeth, 
+                       linker_addr(&_text_start),
+                       linker_addr(&_text_end),
+                       load_addr(&_text_start));
+    setup_initial_pagetables(second, first, zeroeth,
+                       linker_addr(&_init_start),
+                       linker_addr(&_init_end),
+                       load_addr(&_init_start));
+    setup_initial_pagetables(second, first, zeroeth,
+                       linker_addr(&_cpuinit_start),
+                       linker_addr(&_cpuinit_end),
+                       load_addr(&_cpuinit_start));
+    setup_initial_pagetables(second, first, zeroeth,
+                       linker_addr(&_spinlock_start),
+                       linker_addr(&_spinlock_end),
+                       load_addr(&_spinlock_start));
+    setup_initial_pagetables(second, first, zeroeth,
+                       linker_addr(&_rodata_start),
+                       linker_addr(&_rodata_end),
+                       load_addr(&_rodata_start));
+    setup_initial_pagetables(second, first, zeroeth, linker_addr_start, linker_addr_end, load_addr_start);
+
+    /* Ensure page table writes precede loading the SATP */
+    asm volatile ("sfence.vma");
+
+    /* Enable the MMU and load the pagetable */
+    csr_write(satp, (load_addr(xen_second_pagetable) >> PAGE_SHIFT) | SATP_MODE);
 }
 
 /*

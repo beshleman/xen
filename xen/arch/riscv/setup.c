@@ -66,9 +66,6 @@ void __init start_xen(void)
         .stop_bits = 1
     };
 
-
-    setup_pagetables(0x80200000);
-
     ns16550.io_base = 0x10000000;
     ns16550.irq     = 10;
     ns16550.baud    = 115200;

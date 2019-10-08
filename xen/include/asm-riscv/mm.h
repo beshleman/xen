@@ -272,7 +272,12 @@ static inline bool arch_mfn_in_directmap(unsigned long mfn)
     return true;
 }
 
-void setup_pagetables(unsigned long boot_phys_offset);
+void __attribute__ ((section(".entry"))) setup_initial_pagetables(unsigned long *second,
+                                                          unsigned long *first,
+                                                          unsigned long *zeroeth,
+                                                          unsigned long map_start,
+                                                          unsigned long map_end,
+                                                          unsigned long pa_start);
 
 #endif /*  __ARCH_RISCV_MM__ */
 /*
