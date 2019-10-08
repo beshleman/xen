@@ -287,12 +287,6 @@
 
 #define PTE_PPN_SHIFT			10
 
-#define PTE_TABLE(PTE)			\
-	(((PTE) & (PTE_V | PTE_R | PTE_W | PTE_X)) == PTE_V)
-
-#define PTE_SHIFT			12
-#define PTE_SIZE			(1 << PTE_SHIFT)
-
 #ifdef CONFIG_64BIT
 #define PTE_LEVEL_BITS			9
 #else

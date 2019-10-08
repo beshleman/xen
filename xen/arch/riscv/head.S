@@ -4,6 +4,8 @@
 #include <asm/csr.h>
 #include <asm/config.h>
 
+.global _start
+
 ENTRY(start)
 	.section .entry, "ax", %progbits
 _start:
@@ -40,6 +42,8 @@ _start:
 	REG_S	a2, (a6)
 	la	a6, _load_end
 	REG_S	a3, (a6)
+	la	a6, _end
+	REG_S	a3, (a6)
 
 	/* Zero-out bss section */
 	la	a6, __bss_start
@@ -61,6 +65,11 @@ _bss_zero:
 	sub	a0, a0, a4
 	add	sp, a0, a2
 
+        /* Setup hang for IRQ vector w/ virtual address */
+	la	a6, __debug_irq_vector
+        REG_L   a4, (a6)
+	csrw	CSR_STVEC, a4
+
 	/* Setup initial page table */
 	la	a6, _load_start
 	REG_L	a0, (a6)
@@ -70,7 +79,7 @@ _bss_zero:
 	REG_L	a2, (a6)
 	la	a6, __exec_end
 	REG_L	a3, (a6)
-	call	_setup_initial_pgtbl
+	call	_setup_initial_pagetables
 
 	j	_start_secondary_nopen
 
@@ -86,23 +95,8 @@ __start_secondary_pen_release:
 	 */
 _start_secondary_nopen:
 	/* Set trap vector to spin forever to help debug */
-	la	a6, _start_hang
-	csrw	CSR_STVEC, a6
-
-	/* Enable MMU */
-	la	a6, _load_start
-	REG_L	a2, (a6)
-	la	a6, __exec_start
-	REG_L	a4, (a6)
-	la	a6, __pgtbl_root
-	REG_L	a0, (a6)
-	sub	a0, a0, a4
-	add	a0, a0, a2
-	srl	a0, a0, 12 /* Shift right by page size */
-	li	a1, SATP_MODE
-	or	a0, a0, a1
-	sfence.vma
-	csrw	CSR_SATP, a0
+	//la	a6, _start_hang
+	//csrw	CSR_STVEC, a6
 
 	/* Jump to final execution address */
 	la	a6, __cpu_init
@@ -114,8 +108,10 @@ _start_hang:
 	j	_start_hang
 
 	.align 3
+__phys_offset:
+	RISCV_PTR phys_offset
 __pgtbl_root:
-	RISCV_PTR def_pgtbl
+	RISCV_PTR xen_second_pagetable
 __exec_start:
 	RISCV_PTR _code_start
 __exec_end:
@@ -124,6 +120,8 @@ __bss_start:
 	RISCV_PTR _bss_start
 __bss_end:
 	RISCV_PTR _bss_end
+__debug_irq_vector:
+	RISCV_PTR _start_hang
 __cpu_init:
 	RISCV_PTR _cpu_init
 
@@ -155,6 +153,10 @@ _load_start:
 _load_end:
 	RISCV_PTR 0x0
 
+        .globl _end
+_end:
+	RISCV_PTR 0x0
+
 	/*
 	 * Exception stacks.
 	 */
@@ -165,8 +167,13 @@ __hvc_stack_end:
 	.globl _cpu_init
 _cpu_init:
 	/* Re-setup exception handler */
-	la	a6, _start_hang
-	csrw	CSR_STVEC, a6
+	//la	a6, _start_hang
+	//csrw	CSR_STVEC, a6
+
+        /* Set stack pointer to virtual address at end of the Xen executable */
+	la	a6, __exec_end
+        REG_L   sp, (a6)
+
 
 	/* Jump to C code */
 	call	start_xen

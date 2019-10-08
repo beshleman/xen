@@ -1,7 +1,8 @@
 /*
- * xen/arch/arm/setup.c
+ * xen/arch/riscv/setup.c
  *
- * Early bringup code for an ARMv7-A with virt extensions.
+ * Early bringup code for a RISC-V RV32/64 with hypervisor
+ * extensions (code H).
  *
  * Tim Deegan <tim@xen.org>
  * Copyright (c) 2011 Citrix Systems.
@@ -45,6 +46,7 @@
 /* The lucky hart to first increment this variable will boot the other cores */
 atomic_t hart_lottery;
 unsigned long boot_cpu_hartid;
+unsigned long total_pages;
 
 void arch_get_xen_caps(xen_capabilities_info_t *info)
 {
@@ -58,6 +60,95 @@ void arch_get_xen_caps(xen_capabilities_info_t *info)
     safe_strcat(*info, s);
 }
 
+/* TODO: remove all of this before RFC'ing 
+ * TODO: Hardcode a PDX offset/hole and try to understand what it does
+ */
+struct memory_bank {
+    unsigned long start;
+    unsigned long size;
+};
+
+struct memory_bank banks[] = {
+    /* memory-node from dts.  Ram */
+
+#define OPENSBI_OFFSET 0x0200000
+#define XEN_OFFSET     (12 << 20)
+
+    /* Hardcode to be offset from Xen load addr space */
+    {.start = 0x00080000000 + OPENSBI_OFFSET + XEN_OFFSET, .size=0x8000000 - OPENSBI_OFFSET - XEN_OFFSET},
+};
+
+static int nr_banks = (int) ARRAY_SIZE(banks);
+
+static void __init init_pdx(void)
+{
+    paddr_t bank_start, bank_size, bank_end;
+
+    /*
+     * Arm does not have any restrictions on the bits to compress. Pass 0 to
+     * let the common code further restrict the mask.
+     *
+     * If the logic changes in pfn_pdx_hole_setup we might have to
+     * update this function too.
+     */
+    uint64_t mask = pdx_init_mask(0x0);
+    int bank;
+
+    for ( bank = 0 ; bank < nr_banks; bank++ )
+    {
+        bank_start = banks[bank].start;
+        bank_size = banks[bank].size;
+
+        mask |= bank_start | pdx_region_mask(bank_start, bank_size);
+    }
+
+    for ( bank = 0 ; bank < nr_banks; bank++ )
+    {
+        bank_start = banks[bank].start;
+        bank_size = banks[bank].size;
+
+        if (~mask & pdx_region_mask(bank_start, bank_size))
+            mask = 0;
+    }
+
+    pfn_pdx_hole_setup(mask >> PAGE_SHIFT);
+
+    for ( bank = 0 ; bank < nr_banks; bank++ )
+    {
+        bank_start = banks[bank].start;
+        bank_size = banks[bank].size;
+        bank_end = bank_start + bank_size;
+
+        set_pdx_range(paddr_to_pfn(bank_start),
+                      paddr_to_pfn(bank_end));
+    }
+}
+
+static void __init setup_mm(void)
+{
+    paddr_t ram_start, ram_end, ram_size;
+
+    init_pdx();
+
+    /* 0x80000000 - 0x80200000 is PMP protected by OpenSBI
+     * so exclude it from the ram range (any attempt at using it
+     * will trigger a PMP fault)
+     */
+
+    ram_start = banks[0].start;
+    ram_size  = banks[0].size;
+    ram_end   = ram_start + ram_size;
+    total_pages = ram_size >> PAGE_SHIFT;
+
+    setup_xenheap_mappings(ram_start>>PAGE_SHIFT, total_pages);
+    xenheap_virt_end = XENHEAP_VIRT_START + ram_end - ram_start;
+    xenheap_mfn_end = maddr_to_mfn(ram_end);
+    init_boot_pages(mfn_to_maddr(xenheap_mfn_start),
+                    mfn_to_maddr(xenheap_mfn_end));
+    max_page = PFN_DOWN(ram_end);
+    setup_frametable_mappings(0, ram_end);
+}
+
 void __init start_xen(void)
 {
     struct ns16550_defaults ns16550 = {
@@ -66,9 +157,12 @@ void __init start_xen(void)
         .stop_bits = 1
     };
 
+    setup_virtual_regions(NULL, NULL);
+    setup_mm();
+    end_boot_allocator();
+    vm_init();
 
-    setup_pagetables(0x80200000);
-
+    /* Setup UART */
     ns16550.io_base = 0x10000000;
     ns16550.irq     = 10;
     ns16550.baud    = 115200;
@@ -76,8 +170,6 @@ void __init start_xen(void)
     console_init_preirq();
 
     printk("RISC-V Xen Boot!\n");
-
-    preinit_xen_time();
 }
 /*
  * Local variables:

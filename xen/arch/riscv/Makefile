@@ -5,7 +5,6 @@ obj-y   += domain.o
 obj-y   += delay.o
 # obj-y   += entry.o
 obj-y   += guestcopy.o
-obj-y   += initial_pgtbl.o
 obj-y   += irq.o
 obj-y   += p2m.o
 obj-y   += mm.o

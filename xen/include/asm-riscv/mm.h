@@ -22,6 +22,8 @@
  */
 #define PFN_ORDER(_pfn) ((_pfn)->v.free.order)
 
+extern unsigned long frametable_base_pdx;
+
 struct page_info
 {
     /* Each frame can be threaded onto a doubly-linked list. */
@@ -146,6 +148,7 @@ extern vaddr_t xenheap_virt_start;
 #define mfn_valid(mfn)        0
 
 /* Convert between machine frame numbers and page-info structures. */
+/* NOTE: mfn_to_page(x) -> FRAMETABLE_VIRT_START + (sizeof(struct page_info *) * mfn) */
 #define mfn_to_page(mfn)                                            \
     (frame_table + (mfn_to_pdx(mfn)))
 #define page_to_mfn(pg)                                             \
@@ -158,7 +161,7 @@ extern vaddr_t xenheap_virt_start;
 /* Convert between frame number and address formats.  */
 #define pfn_to_paddr(pfn) ((paddr_t)(pfn) << PAGE_SHIFT)
 #define paddr_to_pfn(pa)  ((unsigned long)((pa) >> PAGE_SHIFT))
-#define paddr_to_pdx(pa)    pfn_to_pdx(paddr_to_pfn(pa))
+#define paddr_to_pdx(pa)    mfn_to_pdx(maddr_to_mfn(pa))
 #define gfn_to_gaddr(gfn)   pfn_to_paddr(gfn_x(gfn))
 #define gaddr_to_gfn(ga)    _gfn(paddr_to_pfn(ga))
 #define mfn_to_maddr(mfn)   pfn_to_paddr(mfn_x(mfn))
@@ -168,27 +171,36 @@ extern vaddr_t xenheap_virt_start;
 
 extern unsigned long max_page;
 extern unsigned long total_pages;
-
-static inline paddr_t __virt_to_maddr(vaddr_t va)
-{
-    uint64_t par = va_to_par(va);
-    return (par & PADDR_MASK & PAGE_MASK) | (va & ~PAGE_MASK);
-}
-#define virt_to_maddr(va)   __virt_to_maddr((vaddr_t)(va))
+extern unsigned long xenheap_base_pdx;
 
 /* Page-align address and convert to frame number format */
 #define paddr_to_pfn_aligned(paddr)    paddr_to_pfn(PAGE_ALIGN(paddr))
 
 static inline void *maddr_to_virt(paddr_t ma)
 {
+    ASSERT((mfn_to_pdx(maddr_to_mfn(ma)) - xenheap_base_pdx) <
+           (DIRECTMAP_SIZE >> PAGE_SHIFT));
+
     return (void *)(XENHEAP_VIRT_START -
-                    mfn_to_maddr(xenheap_mfn_start) +
+                    (xenheap_base_pdx << PAGE_SHIFT) +
                     ((ma & ma_va_bottom_mask) |
                      ((ma & ma_top_mask) >> pfn_pdx_hole_shift)));
 }
 
+static inline paddr_t __virt_to_maddr(vaddr_t va)
+{
+    unsigned long heap_phys_start = mfn_to_maddr(xenheap_mfn_start);
+
+    /* TODO: Check if this va is a heap frame or not */
+    while (va < XENHEAP_VIRT_START);
+
+    return (paddr_t) (va - XENHEAP_VIRT_START + heap_phys_start);
+}
+
+#define virt_to_maddr(va) __virt_to_maddr((vaddr_t) (va))
+
 /* Convert between Xen-heap virtual addresses and machine frame numbers. */
-#define __virt_to_mfn(va) (virt_to_maddr(va) >> PAGE_SHIFT)
+#define __virt_to_mfn(va)  paddr_to_pfn((vaddr_t)va)
 #define __mfn_to_virt(mfn) (maddr_to_virt((paddr_t)(mfn) << PAGE_SHIFT))
 
 /*
@@ -272,7 +284,18 @@ static inline bool arch_mfn_in_directmap(unsigned long mfn)
     return true;
 }
 
-void setup_pagetables(unsigned long boot_phys_offset);
+void setup_xenheap_mappings(unsigned long heap_start, unsigned long page_cnt);
+
+void setup_frametable_mappings(paddr_t ps, paddr_t pe);
+
+void __attribute__ ((section(".entry")))
+setup_initial_pagetables(pte_t *second,
+                         pte_t *first,
+                         pte_t *zeroeth,
+                         unsigned long map_start,
+                         unsigned long map_end,
+                         unsigned long pa_start);
+
 
 #endif /*  __ARCH_RISCV_MM__ */
 /*

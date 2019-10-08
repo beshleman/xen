@@ -3,6 +3,7 @@
  * Copyright (C) 2012 Regents of the University of California
  * Copyright (C) 2017 SiFive
  * Copyright (C) 2017 XiaojingZhu <zhuxiaoj@ict.ac.cn>
+ * Copyright (C) 2019 Bobby Eshleman <bobbyeshleman@gmail.com>
  *
  *   This program is free software; you can redistribute it and/or
  *   modify it under the terms of the GNU General Public License
@@ -21,6 +22,7 @@
 #include <xen/const.h>
 #include <xen/config.h>
 #include <asm/riscv_encoding.h>
+#include <asm/asm.h>
 
 /*
  * PAGE_OFFSET -- the first address of the first page of memory.
@@ -29,97 +31,79 @@
  */
 #define PAGE_OFFSET		_AC(CONFIG_PAGE_OFFSET, UL)
 
-#define PAGE_ENTRIES    1024
-
 #define KERN_VIRT_SIZE (-PAGE_OFFSET)
 
-/* Taken from Xvisor */
-#define PGTBL_INITIAL_TABLE_COUNT           8
-#define PGTBL_TABLE_SIZE                0x00001000
-#define PGTBL_TABLE_SIZE_SHIFT              12
-#ifdef CONFIG_RISCV_64
-#define PGTBL_TABLE_ENTCNT              512
-#define PGTBL_TABLE_ENTSZ               8
-#else
-#define PGTBL_TABLE_ENTCNT              1024
-#define PGTBL_TABLE_ENTSZ               4
-#endif
-#define PGTBL_PAGE_SIZE                 0x00001000
-#define PGTBL_PAGE_SIZE_SHIFT               12
+#define PAGE_ENTRIES           512
+#define VPN_BITS               (9)
+#define VPN_MASK               ((unsigned long)((1 << VPN_BITS) - 1))
 
 #ifdef CONFIG_RISCV_64
 /* L3 index Bit[47:39] */
-#define PGTBL_L3_INDEX_MASK             0x0000FF8000000000ULL
-#define PGTBL_L3_INDEX_SHIFT                39
-#define PGTBL_L3_BLOCK_SIZE             0x0000008000000000ULL
-#define PGTBL_L3_MAP_MASK               (~(PGTBL_L3_BLOCK_SIZE - 1))
+#define THIRD_SHIFT            (39)
+#define THIRD_MASK             (VPN_MASK << THIRD_SHIFT)
 /* L2 index Bit[38:30] */
-#define PGTBL_L2_INDEX_MASK             0x0000007FC0000000ULL
-#define PGTBL_L2_INDEX_SHIFT                30
-#define PGTBL_L2_BLOCK_SIZE             0x0000000040000000ULL
-#define PGTBL_L2_MAP_MASK               (~(PGTBL_L2_BLOCK_SIZE - 1))
+#define SECOND_SHIFT           (30)
+#define SECOND_MASK            (VPN_MASK << SECOND_SHIFT)
 /* L1 index Bit[29:21] */
-#define PGTBL_L1_INDEX_MASK             0x000000003FE00000ULL
-#define PGTBL_L1_INDEX_SHIFT                21
-#define PGTBL_L1_BLOCK_SHIFT                21
-#define PGTBL_L1_BLOCK_SIZE             0x0000000000200000ULL
-#define PGTBL_L1_MAP_MASK               (~(PGTBL_L1_BLOCK_SIZE - 1))
+#define FIRST_SHIFT            (21)
+#define FIRST_MASK             (VPN_MASK << FIRST_SHIFT)
 /* L0 index Bit[20:12] */
-#define PGTBL_L0_INDEX_MASK             0x00000000001FF000ULL
-#define PGTBL_L0_INDEX_SHIFT                12
-#define PGTBL_L0_BLOCK_SHIFT                12
-#define PGTBL_L0_BLOCK_SIZE             0x0000000000001000ULL
-#define PGTBL_L0_MAP_MASK               (~(PGTBL_L0_BLOCK_SIZE - 1))
-#else
+#define ZEROETH_SHIFT          (12)
+#define ZEROETH_MASK           (VPN_MASK << ZEROETH_SHIFT)
+
+#else // CONFIG_RISCV_32
+
 /* L1 index Bit[31:22] */
-#define PGTBL_L1_INDEX_MASK             0xFFC00000UL
-#define PGTBL_L1_INDEX_SHIFT                22
-#define PGTBL_L1_BLOCK_SHIFT                22
-#define PGTBL_L1_BLOCK_SIZE             0x00400000UL
-#define PGTBL_L1_MAP_MASK               (~(PGTBL_L1_BLOCK_SIZE - 1))
+#define FIRST_SHIFT            (22)
+#define FIRST_MASK             (VPN_MASK << FIRST_SHIFT)
+
 /* L0 index Bit[21:12] */
-#define PGTBL_L0_INDEX_MASK             0x003FF000UL
-#define PGTBL_L0_INDEX_SHIFT                12
-#define PGTBL_L0_BLOCK_SHIFT                12
-#define PGTBL_L0_BLOCK_SIZE             0x00001000UL
-#define PGTBL_L0_MAP_MASK               (~(PGTBL_L0_BLOCK_SIZE - 1))
+#define ZEROETH_SHIFT          (12)
+#define ZEROETH_MASK           (VPN_MASK << ZEROETH_SHIFT)
 #endif
 
-#define PGTBL_PTE_ADDR_MASK             0x003FFFFFFFFFFC00ULL
-#define PGTBL_PTE_ADDR_SHIFT                10
-#define PGTBL_PTE_RSW_MASK              0x0000000000000300ULL
-#define PGTBL_PTE_RSW_SHIFT             8
-#define PGTBL_PTE_DIRTY_MASK                0x0000000000000080ULL
-#define PGTBL_PTE_DIRTY_SHIFT               7
-#define PGTBL_PTE_ACCESSED_MASK             0x0000000000000040ULL
-#define PGTBL_PTE_ACCESSED_SHIFT            6
-#define PGTBL_PTE_GLOBAL_MASK               0x0000000000000020ULL
-#define PGTBL_PTE_GLOBAL_SHIFT              5
-#define PGTBL_PTE_USER_MASK             0x0000000000000010ULL
-#define PGTBL_PTE_USER_SHIFT                4
-#define PGTBL_PTE_EXECUTE_MASK              0x0000000000000008ULL
-#define PGTBL_PTE_EXECUTE_SHIFT             3
-#define PGTBL_PTE_WRITE_MASK                0x0000000000000004ULL
-#define PGTBL_PTE_WRITE_SHIFT               2
-#define PGTBL_PTE_READ_MASK             0x0000000000000002ULL
-#define PGTBL_PTE_READ_SHIFT                1
-#define PGTBL_PTE_PERM_MASK             (PGTBL_PTE_EXECUTE_MASK | \
-                             PGTBL_PTE_WRITE_MASK | \
-                             PGTBL_PTE_READ_MASK)
-#define PGTBL_PTE_VALID_MASK                0x0000000000000001ULL
-#define PGTBL_PTE_VALID_SHIFT               0
+#define THIRD_SIZE             (1 << THIRD_SHIFT)
+#define THIRD_MAP_MASK         (~(THIRD_SIZE - 1))
+#define SECOND_SIZE            (1 << SECOND_SHIFT)
+#define SECOND_MAP_MASK        (~(SECOND_SIZE - 1))
+#define FIRST_SIZE             (1 << FIRST_SHIFT)
+#define FIRST_MAP_MASK         (~(FIRST_SIZE - 1))
+#define ZEROETH_SIZE           (1 << ZEROETH_SHIFT)
+#define ZEROETH_MAP_MASK       (~(ZEROETH_SIZE - 1))
+
+#define PTE_ADDR_MASK          0x003FFFFFFFFFFC00ULL
+#define PTE_SHIFT              10
+#define PTE_RSW_MASK           0x0000000000000300ULL
+#define PTE_RSW_SHIFT          8
+
+#define PTE_USER_SHIFT         4
+#define PTE_PERM_MASK                (PTE_EXECUTE_MASK | \
+                                      PTE_WRITE_MASK | \
+                                      PTE_READ_MASK)
+
+#define PTE_VALID       BIT(0, UL)
+#define PTE_READABLE    BIT(1, UL)
+#define PTE_WRITABLE    BIT(2, UL)
+#define PTE_EXECUTABLE  BIT(3, UL)
+#define PTE_USER        BIT(4, UL)
+#define PTE_GLOBAL      BIT(5, UL)
+#define PTE_ACCESSED    BIT(6, UL)
+#define PTE_DIRTY       BIT(7, UL)
+#define PTE_RSW         (BIT(8, UL) | BIT(9, UL))
+
+#define PTE_LEAF_DEFAULT (PTE_VALID | PTE_READABLE | PTE_WRITABLE | PTE_EXECUTABLE)
+#define PTE_TABLE (PTE_VALID)
 
 /* Calculate the offsets into the pagetables for a given VA */
-#define zeroeth_linear_offset(va) ((va) >> PGTBL_L0_INDEX_SHIFT)
-#define first_linear_offset(va) ((va) >> PGTBL_L1_INDEX_SHIFT)
-#define second_linear_offset(va) ((va) >> PGTBL_L2_INDEX_SHIFT)
-#define third_linear_offset(va) ((va) >> PGTBL_L3_INDEX_SHIFT)
+#define zeroeth_linear_offset(va) ((va) >> ZEROETH_SHIFT)
+#define first_linear_offset(va) ((va) >> FIRST_SHIFT)
+#define second_linear_offset(va) ((va) >> SECOND_SHIFT)
+#define third_linear_offset(va) ((va) >> THIRD_SHIFT)
 
-#define TABLE_OFFSET(offs) ((unsigned int)(offs) & PGTBL_PTE_ADDR_MASK)
-#define first_table_offset(va)  TABLE_OFFSET(first_linear_offset(va))
-#define second_table_offset(va) TABLE_OFFSET(second_linear_offset(va))
-#define third_table_offset(va)  TABLE_OFFSET(third_linear_offset(va))
-#define zeroeth_table_offset(va)  TABLE_OFFSET(zeroeth_linear_offset(va))
+#define pagetable_zeroeth_index(va) zeroeth_linear_offset((va) & ZEROETH_MASK)
+#define pagetable_first_index(va) first_linear_offset((va) & FIRST_MASK)
+#define pagetable_second_index(va) second_linear_offset((va) & SECOND_MASK)
+#define pagetable_third_index(va) third_linear_offset((va) & THIRD_MASK)
 
 #ifndef __ASSEMBLY__
 
@@ -204,7 +188,7 @@ typedef struct {
 
 /* Page Table entry */
 typedef struct {
-	unsigned long pte;
+    uint64_t pte;
 } pte_t;
 
 typedef struct {
@@ -216,6 +200,46 @@ typedef struct page *pgtable_t;
 #define pte_val(x)	((x).pte)
 #define pgd_val(x)	((x).pgd)
 #define pgprot_val(x)	((x).pgprot)
+
+static inline bool pte_is_table(pte_t *p)
+{
+    return (((p->pte) & (PTE_VALID
+                        | PTE_READABLE
+                        | PTE_WRITABLE
+                        | PTE_EXECUTABLE)) == PTE_VALID);
+}
+
+static inline bool pte_is_valid(pte_t *p)
+{
+    return p->pte & PTE_VALID;
+}
+
+static inline bool pte_is_leaf(pte_t *p)
+{
+    return (p->pte & (PTE_WRITABLE | PTE_READABLE | PTE_EXECUTABLE));
+}
+
+/* Shift the VPN[x] or PPN[x] fields of a virtual or physical address
+ * to become the shifted PPN[x] fields of a page table entry */
+#define addr_to_ppn(x) (((x) >> PAGE_SHIFT) << PTE_SHIFT)
+
+static inline pte_t paddr_to_pte(unsigned long paddr)
+{
+    return (pte_t) { .pte = addr_to_ppn(paddr) };
+}
+
+static inline paddr_t pte_to_paddr(pte_t *p)
+{
+     return (paddr_t) ((p->pte >> PTE_SHIFT) << PAGE_SHIFT);
+}
+
+#define pte_get_mfn(pte_)      _mfn(((pte_).pte) >> PTE_SHIFT)
+
+#define MEGAPAGE_ALIGN(x) ((x) & FIRST_MAP_MASK)
+#define GIGAPAGE_ALIGN(x) ((x) & SECOND_MAP_MASK)
+
+#define paddr_to_megapage_ppn(x) addr_to_ppn(MEGAPAGE_ALIGN(x))
+#define paddr_to_gigapage_ppn(x) addr_to_ppn(GIGAPAGE_ALIGN(x))
 
 #define __pte(x)	((pte_t) { (x) })
 #define __pgd(x)	((pgd_t) { (x) })
@@ -290,6 +314,14 @@ static inline uint64_t va_to_par(vaddr_t va)
       [xlen_minus_16] "i" (__riscv_xlen - 16));
 
     return val;
+}
+
+/* Write a pagetable entry. */
+static inline void write_pte(pte_t *p, pte_t pte)
+{
+    asm volatile ("sfence.vma");
+    *p = pte;
+    asm volatile ("sfence.vma");
 }
 
 #endif /* _ASM_RISCV_PAGE_H */
