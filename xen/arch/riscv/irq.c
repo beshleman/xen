@@ -89,6 +89,11 @@ void arch_move_irqs(struct vcpu *v)
     /* TODO */
 }
 
+void (pirq_cleanup_check)(struct pirq *pirq, struct domain *d)
+{
+    /* TODO */
+}
+
 int setup_irq(unsigned int irq, unsigned int irqflags, struct irqaction *new)
 {
     int rc = 0;

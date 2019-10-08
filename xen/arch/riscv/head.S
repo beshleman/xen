@@ -115,7 +115,7 @@ _start_hang:
 
 	.align 3
 __pgtbl_root:
-	RISCV_PTR def_pgtbl
+	RISCV_PTR xen_second_pagetable
 __exec_start:
 	RISCV_PTR _code_start
 __exec_end:

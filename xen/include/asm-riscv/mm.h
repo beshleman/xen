@@ -274,14 +274,12 @@ static inline bool arch_mfn_in_directmap(unsigned long mfn)
     return true;
 }
 
-void setup_pagetables(unsigned long boot_phys_offset);
+void __setup_pagetables(unsigned long boot_phys_offset);
 
 void __init setup_xenheap_mappings(unsigned long base_mfn,
                                    unsigned long nr_mfns);
 
 void __init setup_frametable_mappings(paddr_t ps, paddr_t pe);
-
-void __init map_more_boot_pages(void);
 
 #endif /*  __ARCH_RISCV_MM__ */
 /*

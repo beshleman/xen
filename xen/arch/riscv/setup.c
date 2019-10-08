@@ -134,7 +134,6 @@ static void __init setup_mm(void)
     init_boot_pages(pfn_to_paddr(boot_mfn_start), pfn_to_paddr(boot_mfn_end));
 
     /* TODO: Add non-xenheap memory, use dt for unreserved space */
-    map_more_boot_pages();
 
     max_page = PFN_DOWN(ram_end);
     setup_frametable_mappings(0, 0x80000000UL);
@@ -153,7 +152,7 @@ void __init start_xen(void)
         .stop_bits = 1
     };
 
-    setup_pagetables(0x80200000);
+    __setup_pagetables(0x80200000);
 
     setup_virtual_regions(NULL, NULL);
     setup_mm();

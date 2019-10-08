@@ -45,7 +45,7 @@ ALL_OBJS-$(CONFIG_CRYPTO)   += $(BASEDIR)/crypto/built_in.o
 CFLAGS_UBSAN :=
 
 ifeq ($(CONFIG_DEBUG),y)
-CFLAGS += -O1
+#CFLAGS += -O1
 else
 CFLAGS += -O2
 endif

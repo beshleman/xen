@@ -36,15 +36,6 @@ mfn_t xenheap_mfn_end __read_mostly;
 vaddr_t xenheap_virt_end __read_mostly;
 vaddr_t xenheap_virt_start __read_mostly;
 
-/*
- * xen_second_pagetable is indexed with the VPN[2] page table entry field
- * xen_first_pagetable is accessed from the VPN[1] page table entry field
- * xen_zeroeth_pagetable is accessed from the VPN[0] page table entry field
- */
-pte_t xen_second_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
-pte_t xen_first_pagetable[PAGE_ENTRIES * 2] __attribute__((__aligned__(4096*2)));
-static pte_t xen_zeroeth_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
-
 /* This needs to be set by the address at which the bootloade has loaded Xen */
 static paddr_t phys_offset;
 
@@ -360,127 +351,10 @@ unsigned long get_upper_mfn_bound(void)
     return max_page - 1;
 }
 
-extern u8 def_pgtbl[PGTBL_INITIAL_TABLE_SIZE];
-extern u32 gbl_pgtbl_cnt;
-
-#define sv39_physaddr(pte) (unsigned long *)(unsigned long) \
-                    (((pte & PGTBL_PTE_ADDR_MASK)          \
-                      >> PGTBL_PTE_ADDR_SHIFT)             \
-                     << PGTBL_PAGE_SIZE_SHIFT)
-
-static inline unsigned long *level_two_offset(unsigned long *pgtbl, unsigned long vaddr)
-{
-    u32 index = pgtbl_second_index(vaddr);
-
-    if (!(pgtbl[index] & PGTBL_PTE_VALID_MASK)) {
-        return NULL;
-    }
-
-    return sv39_physaddr(pgtbl[index]);
-}
-
-static inline unsigned long *level_one_offset(unsigned long *pgtbl, unsigned long vaddr)
-{
-    u32 index = pgtbl_first_index(vaddr);
-
-    if (!(pgtbl[index] & PGTBL_PTE_VALID_MASK)) {
-        return NULL;
-    }
-
-    return sv39_physaddr(pgtbl[index]);
-}
-
-static inline unsigned long *level_zero_offset(unsigned long *pgtbl, unsigned long vaddr)
-{
-    u32 index = pgtbl_zeroeth_index(vaddr);
-
-    if (!(pgtbl[index] & PGTBL_PTE_VALID_MASK)) {
-        return NULL;
-    }
-
-    return sv39_physaddr(pgtbl[index]);
-}
-
-static inline void point_entry_to_next_table(unsigned long *pgtbl, u32 index, unsigned long *next_pgtbl)
-{
-    int i;
-    
-    for (i = 0; i < PGTBL_TABLE_ENTCNT; i++) {
-            next_pgtbl[i] = 0x0ULL;
-    }
-    pgtbl[index] = (unsigned long)next_pgtbl;
-    pgtbl[index] = pgtbl[index] >> PGTBL_PAGE_SIZE_SHIFT;
-    pgtbl[index] = pgtbl[index] << PGTBL_PTE_ADDR_SHIFT;
-    pgtbl[index] |= PGTBL_PTE_VALID_MASK;
-}
-
 void xen_pt_update_entry_to_addr(unsigned long vaddr, unsigned long paddr)
 {
-    u32 index;
-    unsigned long *next_pte;
-    unsigned long *base = (unsigned long*) &def_pgtbl;
-    unsigned long *pgtbl = base;
-    unsigned long *next_pgtbl = base;
-
-    next_pgtbl += (PGTBL_TABLE_ENTCNT * gbl_pgtbl_cnt);
-
-    next_pte = level_two_offset(pgtbl, vaddr);
-    /* If no entry found, then allocate one */
-    if (!next_pte) {
-            if (gbl_pgtbl_cnt >= PGTBL_INITIAL_TABLE_COUNT) {
-                    while (1) ;	/* No initial table available */
-            }
-
-            index = pgtbl_second_index(vaddr);
-
-            /* Point pgtbl[v2] to the next page table */
-            point_entry_to_next_table(pgtbl, index, next_pgtbl);
-            
-            /* Advance the pointer to the next table */
-            pgtbl = next_pgtbl;
-
-            /* Advance the next_pgtbl pointer to the next table */
-            next_pgtbl += PGTBL_TABLE_ENTCNT;
-            gbl_pgtbl_cnt++;
-
-    } else {
-        pgtbl = next_pte;
-    }
-
-    next_pte = level_one_offset(pgtbl, vaddr);
-    /* If no entry found, then allocate one */
-    if (!next_pte) {
-            if (gbl_pgtbl_cnt >= PGTBL_INITIAL_TABLE_COUNT) {
-                    while (1) ;	/* No initial table available */
-            }
-            index = pgtbl_first_index(vaddr);
-
-            /* Point pgtbl[v1] to the next page table */
-            point_entry_to_next_table(pgtbl, index, next_pgtbl);
-            
-            /* Advance the pointer to the next table */
-            pgtbl = next_pgtbl;
-
-            /* Advance the next_pgtbl pointer to the next table */
-            next_pgtbl += PGTBL_TABLE_ENTCNT;
-            gbl_pgtbl_cnt++;
-    } else {
-        pgtbl = next_pte;
-    }
-
-    next_pte = level_zero_offset(pgtbl, vaddr);
-
-    /* If no entry found, then point it the target physical frame */
-    if (!next_pte) {
-            index = pgtbl_zeroeth_index(vaddr);
-            pgtbl[index] = paddr;
-            pgtbl[index] = pgtbl[index] >> PGTBL_PAGE_SIZE_SHIFT;
-            pgtbl[index] = pgtbl[index] << PGTBL_PTE_ADDR_SHIFT;
-            pgtbl[index] |= PGTBL_PTE_EXECUTE_MASK;
-            pgtbl[index] |= PGTBL_PTE_WRITE_MASK;
-            pgtbl[index] |= PGTBL_PTE_READ_MASK;
-            pgtbl[index] |= PGTBL_PTE_VALID_MASK;
-    }
+    (void) vaddr;
+    (void) paddr;
 }
 
 void xen_pt_identity_map(unsigned long vaddr)
@@ -546,81 +420,9 @@ void __init setup_frametable_mappings(paddr_t ps, paddr_t pe)
  * Build the page tables up starting with the zeroeth table, then the first, then second.
  * The zeroeth table will hold the physical frame numbers point to the Xen executable.
  */
-void __init setup_pagetables(unsigned long boot_phys_offset)
+void __init __setup_pagetables(unsigned long boot_phys_offset)
 {
-    pte_t *p;
-    unsigned long pte;
-    unsigned long vaddr;
-    int i;
-
-    phys_offset = boot_phys_offset;
-
-
-    p = xen_zeroeth_pagetable;
-
-    /* Map the entire xen_zeroeth_table to the first PAGE_ENTRIES frames
-     * of the Xen executable.
-     */
-    for (i = 0; i < PAGE_ENTRIES; i++)
-    {
-        vaddr = XEN_VIRT_START + (i << PAGE_SHIFT);
-        //vaddr += boot_phys_offset;
-
-#if 0
-        if ( !is_kernel(vaddr) )
-            break;
-#endif
-
-        /* TODO: protect with correct perms */
-        vaddr >>= PGTBL_PAGE_SIZE_SHIFT;
-        vaddr <<= PGTBL_PTE_ADDR_SHIFT;
-        vaddr |= PGTBL_PTE_EXECUTE_MASK;
-        vaddr |= PGTBL_PTE_WRITE_MASK;
-        vaddr |= PGTBL_PTE_READ_MASK;
-        vaddr |= PGTBL_PTE_VALID_MASK;
-
-        xen_zeroeth_pagetable[i].pte = vaddr;
-    }
-
-    /* Point from the first level to the zeroeth level */
-    pte = (unsigned long) &xen_zeroeth_pagetable[0];
-    pte >>= PGTBL_PAGE_SIZE_SHIFT;
-    pte <<= PGTBL_PTE_ADDR_SHIFT;
-    pte |= PGTBL_PTE_VALID_MASK;
-    /* Flags set to R=0, W=0, E=0 means this pte points to the next pgtbl */
-    pte &= ~PGTBL_PTE_PERM_MASK;
-    xen_first_pagetable[pgtbl_first_index(XEN_VIRT_START)].pte = pte;
-
-    /* Point from the second level to the first level */
-    pte = (unsigned long) &xen_first_pagetable[0];
-    pte >>= PGTBL_PAGE_SIZE_SHIFT;
-    pte <<= PGTBL_PTE_ADDR_SHIFT;
-    pte |= PGTBL_PTE_VALID_MASK;
-    /* Flags set to R=0, W=0, E=0 means this pte points to the next pgtbl */
-    pte &= ~PGTBL_PTE_PERM_MASK;
-    xen_second_pagetable[pgtbl_second_index(XEN_VIRT_START)].pte = pte;
-
-    __asm__ __volatile("sfence.vma");
-
-    csr_write(satp, (((unsigned long)&xen_second_pagetable[0]) >> PAGE_SHIFT) | SATP_MODE);
-}
-
-/* TODO: remove me and dynamically discover reserved boot space */
-void __init map_more_boot_pages(void)
-{
-    unsigned long i;
-
-    /* Hardcode the space between VIRT_TEST and VIRT_CLINT:
-     * TODO: don't do this */
-    unsigned long start = 0x110000;
-    unsigned long end = 0x2000000;
-
-    for (i=start; i<end; i += PAGE_SIZE) {
-        xen_pt_update_entry_to_addr(i + XENHEAP_VIRT_START, i);
-    }
-
-    /* use unreserved space as boot alloc pages */
-    init_boot_pages(start, end);
+    (void) boot_phys_offset;
 }
 
 /*

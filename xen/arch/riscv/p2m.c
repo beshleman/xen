@@ -19,6 +19,12 @@ void p2m_write_unlock(struct p2m_domain *p2m)
     write_unlock(&p2m->lock);
 }
 
+unsigned long p2m_pod_decrease_reservation(struct domain *d, gfn_t gfn,
+                                           unsigned int order)
+{
+    return 0;
+}
+
 void p2m_dump_info(struct domain *d)
 {
     struct p2m_domain *p2m = p2m_get_hostp2m(d);

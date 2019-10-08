@@ -10,7 +10,6 @@
 #include <xen/domain_page.h>
 #include <xen/types.h>
 #include <xen/lib.h>
-#include <xen/mm.h>
 #include <xen/perfc.h>
 #include <xen/sched.h>
 #include <xen/event.h>
@@ -27,6 +26,7 @@
 #include <asm/hardirq.h>
 #include <asm/p2m.h>
 #include <public/memory.h>
+#include <xen/mm.h>
 #include <xsm/xsm.h>
 
 #ifdef CONFIG_X86
