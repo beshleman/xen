@@ -70,7 +70,7 @@ _bss_zero:
 	REG_L	a2, (a6)
 	la	a6, __exec_end
 	REG_L	a3, (a6)
-	call	_setup_initial_pgtbl
+	call	_setup_initial_pagetables
 
 	j	_start_secondary_nopen
 
@@ -89,21 +89,6 @@ _start_secondary_nopen:
 	la	a6, _start_hang
 	csrw	CSR_STVEC, a6
 
-	/* Enable MMU */
-	la	a6, _load_start
-	REG_L	a2, (a6)
-	la	a6, __exec_start
-	REG_L	a4, (a6)
-	la	a6, __pgtbl_root
-	REG_L	a0, (a6)
-	sub	a0, a0, a4
-	add	a0, a0, a2
-	srl	a0, a0, 12 /* Shift right by page size */
-	li	a1, SATP_MODE
-	or	a0, a0, a1
-	sfence.vma
-	csrw	CSR_SATP, a0
-
 	/* Jump to final execution address */
 	la	a6, __cpu_init
 	REG_L	a0, (a6)
@@ -115,7 +100,7 @@ _start_hang:
 
 	.align 3
 __pgtbl_root:
-	RISCV_PTR def_pgtbl
+	RISCV_PTR xen_second_pagetable
 __exec_start:
 	RISCV_PTR _code_start
 __exec_end:
