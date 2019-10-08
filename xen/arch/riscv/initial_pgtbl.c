@@ -45,153 +45,83 @@
 #include <asm/page.h>
 #include <xsm/xsm.h>
 
-struct cpu_mmu_entry_ctrl {
-	int num_levels;
-	u32 pgtbl_count;
-	int *pgtbl_tree;
-	unsigned long *next_pgtbl;
-	unsigned long pgtbl_base;
-};
+/*
+ * xen_second_pagetable is indexed with the VPN[2] page table entry field
+ * xen_first_pagetable is accessed from the VPN[1] page table entry field
+ * xen_zeroeth_pagetable is accessed from the VPN[0] page table entry field
+ */
+unsigned long xen_second_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
+static unsigned long xen_first_pagetable[PAGE_ENTRIES * 2] __attribute__((__aligned__(4096*2)));
+static unsigned long xen_zeroeth_pagetable[PAGE_ENTRIES * 5] __attribute__((__aligned__(4096)));
 
-u8 __attribute__ ((aligned(PGTBL_TABLE_SIZE))) def_pgtbl[PGTBL_INITIAL_TABLE_SIZE] = { 0 };
-int def_pgtbl_tree[PGTBL_INITIAL_TABLE_COUNT];
-u32 gbl_pgtbl_cnt = 0;
-
-void __attribute__ ((section(".entry")))
-    __setup_initial_pgtbl(struct cpu_mmu_entry_ctrl *entry,
-			  unsigned long map_start,
-			  unsigned long map_end,
-			  unsigned long pa_start,
-			  bool writeable)
+void __init clear_pagetables(void)
 {
-	u32 i, index;
-	unsigned long *pgtbl;
-	unsigned long page_addr;
+    unsigned long i;
 
-	/* align start addresses */
-	map_start &= PGTBL_L0_MAP_MASK;
-	pa_start &= PGTBL_L0_MAP_MASK;
+    for (i=0; i<ARRAY_SIZE(xen_second_pagetable); i++) {
+        xen_second_pagetable[i] = 0ULL;
+    }
 
-	page_addr = map_start;
-	while (page_addr < map_end) {
-		pgtbl = (unsigned long *)entry->pgtbl_base;
+    for (i=0; i<ARRAY_SIZE(xen_first_pagetable); i++) {
+        xen_first_pagetable[i] = 0ULL;
+    }
 
-		/* Setup level3 table */
-		if (entry->num_levels < 4) {
-			goto skip_level3;
-		}
-#if CONFIG_RISCV_64
-		index = (page_addr & PGTBL_L3_INDEX_MASK) >> PGTBL_L3_INDEX_SHIFT;
-		if (pgtbl[index] & PGTBL_PTE_VALID_MASK) {
-			/* Find level2 table */
-			pgtbl = (unsigned long *)(unsigned long)
-				(((pgtbl[index] & PGTBL_PTE_ADDR_MASK)
-				  >> PGTBL_PTE_ADDR_SHIFT)
-				 << PGTBL_PAGE_SIZE_SHIFT);
-		} else {
-			/* Allocate new level2 table */
-			if (entry->pgtbl_count == PGTBL_INITIAL_TABLE_COUNT) {
-				while (1) ;	/* No initial table available */
-			}
-			for (i = 0; i < PGTBL_TABLE_ENTCNT; i++) {
-				entry->next_pgtbl[i] = 0x0ULL;
-			}
-			entry->pgtbl_tree[entry->pgtbl_count] =
-			    ((unsigned long)pgtbl - entry->pgtbl_base) >>
-			    PGTBL_TABLE_SIZE_SHIFT;
-			entry->pgtbl_count++;
-			pgtbl[index] = (unsigned long)entry->next_pgtbl;
-			pgtbl[index] = pgtbl[index] >> PGTBL_PAGE_SIZE_SHIFT;
-			pgtbl[index] = pgtbl[index] << PGTBL_PTE_ADDR_SHIFT;
-			pgtbl[index] |= PGTBL_PTE_VALID_MASK;
-			pgtbl = entry->next_pgtbl;
-			entry->next_pgtbl += PGTBL_TABLE_ENTCNT;
-		}
-#endif
-skip_level3:
+    for (i=0; i<ARRAY_SIZE(xen_zeroeth_pagetable); i++) {
+        xen_zeroeth_pagetable[i] = 0ULL;
+    }
+}
 
-		/* Setup level2 table */
-		if (entry->num_levels < 3) {
-			goto skip_level2;
-		}
-#if CONFIG_RISCV_64
-		index = (page_addr & PGTBL_L2_INDEX_MASK) >> PGTBL_L2_INDEX_SHIFT;
-		if (pgtbl[index] & PGTBL_PTE_VALID_MASK) {
-			/* Find level1 table */
-			pgtbl = (unsigned long *)(unsigned long)
-				(((pgtbl[index] & PGTBL_PTE_ADDR_MASK)
-				  >> PGTBL_PTE_ADDR_SHIFT)
-				 << PGTBL_PAGE_SIZE_SHIFT);
-		} else {
-			/* Allocate new level1 table */
-			if (entry->pgtbl_count == PGTBL_INITIAL_TABLE_COUNT) {
-				while (1) ;	/* No initial table available */
-			}
-			for (i = 0; i < PGTBL_TABLE_ENTCNT; i++) {
-				entry->next_pgtbl[i] = 0x0ULL;
-			}
-			entry->pgtbl_tree[entry->pgtbl_count] =
-			    ((unsigned long)pgtbl - entry->pgtbl_base) >>
-			    PGTBL_TABLE_SIZE_SHIFT;
-			entry->pgtbl_count++;
-			pgtbl[index] = (unsigned long)entry->next_pgtbl;
-			pgtbl[index] = pgtbl[index] >> PGTBL_PAGE_SIZE_SHIFT;
-			pgtbl[index] = pgtbl[index] << PGTBL_PTE_ADDR_SHIFT;
-			pgtbl[index] |= PGTBL_PTE_VALID_MASK;
-			pgtbl = entry->next_pgtbl;
-			entry->next_pgtbl += PGTBL_TABLE_ENTCNT;
-		}
-#endif
-skip_level2:
 
-		/* Setup level1 table */
-		if (entry->num_levels < 2) {
-			goto skip_level1;
-		}
-		index = (page_addr & PGTBL_L1_INDEX_MASK) >> PGTBL_L1_INDEX_SHIFT;
-		if (pgtbl[index] & PGTBL_PTE_VALID_MASK) {
-			/* Find level0 table */
-			pgtbl = (unsigned long *)(unsigned long)
-				(((pgtbl[index] & PGTBL_PTE_ADDR_MASK)
-				  >> PGTBL_PTE_ADDR_SHIFT)
-				 << PGTBL_PAGE_SIZE_SHIFT);
-		} else {
-			/* Allocate new level0 table */
-			if (entry->pgtbl_count == PGTBL_INITIAL_TABLE_COUNT) {
-				while (1) ;	/* No initial table available */
-			}
-			for (i = 0; i < PGTBL_TABLE_ENTCNT; i++) {
-				entry->next_pgtbl[i] = 0x0ULL;
-			}
-			entry->pgtbl_tree[entry->pgtbl_count] =
-			    ((unsigned long)pgtbl - entry->pgtbl_base) >>
-			    PGTBL_TABLE_SIZE_SHIFT;
-			entry->pgtbl_count++;
-			pgtbl[index] = (unsigned long)entry->next_pgtbl;
-			pgtbl[index] = pgtbl[index] >> PGTBL_PAGE_SIZE_SHIFT;
-			pgtbl[index] = pgtbl[index] << PGTBL_PTE_ADDR_SHIFT;
-			pgtbl[index] |= PGTBL_PTE_VALID_MASK;
-			pgtbl = entry->next_pgtbl;
-			entry->next_pgtbl += PGTBL_TABLE_ENTCNT;
-		}
-skip_level1:
+void __attribute__ ((section(".entry"))) setup_pagetables(unsigned long *second,
+                                                          unsigned long *first,
+                                                          unsigned long *zeroeth,
+                                                          unsigned long map_start,
+                                                          unsigned long map_end,
+                                                          unsigned long pa_start) {
+    unsigned long page_addr;
+    unsigned long index2;
+    unsigned long index1;
+    unsigned long index0;
 
-		/* Setup level0 table */
-		index = (page_addr & PGTBL_L0_INDEX_MASK) >> PGTBL_L0_INDEX_SHIFT;
-		if (!(pgtbl[index] & PGTBL_PTE_VALID_MASK)) {
-			/* Update level0 table */
-			pgtbl[index] = (page_addr - map_start) + pa_start;
-			pgtbl[index] = pgtbl[index] >> PGTBL_PAGE_SIZE_SHIFT;
-			pgtbl[index] = pgtbl[index] << PGTBL_PTE_ADDR_SHIFT;
-			pgtbl[index] |= PGTBL_PTE_EXECUTE_MASK;
-			pgtbl[index] |= (writeable) ? PGTBL_PTE_WRITE_MASK : 0;
-			pgtbl[index] |= PGTBL_PTE_READ_MASK;
-			pgtbl[index] |= PGTBL_PTE_VALID_MASK;
-		}
+    /* align start addresses */
+    map_start &= PGTBL_L0_MAP_MASK;
+    pa_start &= PGTBL_L0_MAP_MASK;
 
-		/* Point to next page */
-		page_addr += PGTBL_L0_BLOCK_SIZE;
-	}
+    page_addr = map_start;
+    while (page_addr < map_end) {
+        /* Setup level2 table */
+        index2 = (page_addr & PGTBL_L2_INDEX_MASK) >> PGTBL_L2_INDEX_SHIFT;
+        index1 = (page_addr & PGTBL_L1_INDEX_MASK) >> PGTBL_L1_INDEX_SHIFT;
+        index0 = (page_addr & PGTBL_L0_INDEX_MASK) >> PGTBL_L0_INDEX_SHIFT;
+
+        /* Allocate new level1 table */
+        second[index2] = (unsigned long) &first[index1];
+        second[index2] = second[index2] >> PGTBL_PAGE_SIZE_SHIFT;
+        second[index2] = second[index2] << PGTBL_PTE_ADDR_SHIFT;
+        second[index2] |= PGTBL_PTE_VALID_MASK;
+
+        /* Setup level1 table */
+        /* Allocate new level0 table */
+        first[index1] = (unsigned long) &zeroeth[index0];
+        first[index1] = first[index1] >> PGTBL_PAGE_SIZE_SHIFT;
+        first[index1] = first[index1] << PGTBL_PTE_ADDR_SHIFT;
+        first[index1] |= PGTBL_PTE_VALID_MASK;
+
+        /* Setup level0 table */
+        if (!(zeroeth[index0] & PGTBL_PTE_VALID_MASK)) {
+                /* Update level0 table */
+                zeroeth[index0] = (page_addr - map_start) + pa_start;
+                zeroeth[index0] = zeroeth[index0] >> PGTBL_PAGE_SIZE_SHIFT;
+                zeroeth[index0] = zeroeth[index0] << PGTBL_PTE_ADDR_SHIFT;
+                zeroeth[index0] |= PGTBL_PTE_EXECUTE_MASK;
+                zeroeth[index0] |= PGTBL_PTE_WRITE_MASK;
+                zeroeth[index0] |= PGTBL_PTE_READ_MASK;
+                zeroeth[index0] |= PGTBL_PTE_VALID_MASK;
+        }
+
+        /* Point to next page */
+        page_addr += PGTBL_L0_BLOCK_SIZE;
+    }
 }
 
 /* Note: This functions must be called with MMU disabled from
@@ -200,100 +130,73 @@ skip_level1:
  * functions to ensure that it can execute from anywhere.
  */
 #define to_load_pa(va)	({ \
-			unsigned long _tva = (va); \
-			if (exec_start <= _tva && _tva < exec_end) { \
-				_tva = _tva - exec_start + load_start; \
+			unsigned long _tva = (unsigned long) (va); \
+			if (_exec_start <= _tva && _tva < _exec_end) { \
+				_tva = _tva - _exec_start + _load_start; \
 			} \
 			_tva; \
 			})
 #define to_exec_va(va)	({ \
-			unsigned long _tva = (va); \
-			if (load_start <= _tva && _tva < load_end) { \
-				_tva = _tva - load_start + exec_start; \
+			unsigned long _tva = (unsigned long) (va); \
+			if (_load_start <= _tva && _tva < _load_end) { \
+				_tva = _tva - _load_start + _exec_start; \
 			} \
 			_tva; \
 			})
 
-#define SECTION_START(SECTION)	_ ## SECTION ## _start
-#define SECTION_END(SECTION)	_ ## SECTION ## _end
-
-#define SECTION_ADDR_START(SECTION)	(unsigned long)&SECTION_START(SECTION)
-#define SECTION_ADDR_END(SECTION)	(unsigned long)&SECTION_END(SECTION)
-
-#define DECLARE_SECTION(SECTION)					\
-	extern unsigned long SECTION_START(SECTION);			\
-	extern unsigned long SECTION_END(SECTION)
-
-DECLARE_SECTION(text);
-DECLARE_SECTION(cpuinit);
-DECLARE_SECTION(spinlock);
-DECLARE_SECTION(init);
-DECLARE_SECTION(rodata);
-
-#define SETUP_RO_SECTION(ENTRY, SECTION)				\
-	__setup_initial_pgtbl(&(ENTRY),					\
-			     to_exec_va(SECTION_ADDR_START(SECTION)),	\
-			     to_exec_va(SECTION_ADDR_END(SECTION)),	\
-			     to_load_pa(SECTION_ADDR_START(SECTION)),	\
-			     false)
+extern unsigned long _text_start;
+extern unsigned long _text_end;
+extern unsigned long _cpuinit_start;
+extern unsigned long _cpuinit_end;
+extern unsigned long _spinlock_start;
+extern unsigned long _spinlock_end;
+extern unsigned long _init_start;
+extern unsigned long _init_end;
+extern unsigned long _rodata_start;
+extern unsigned long _rodata_end;
 
 void __attribute__ ((section(".entry")))
-    _setup_initial_pgtbl(unsigned long load_start, unsigned long load_end,
-			 unsigned long exec_start, unsigned long exec_end)
+    _setup_initial_pgtbl(unsigned long _load_start, unsigned long _load_end,
+			 unsigned long _exec_start, unsigned long _exec_end)
 {
-	u32 *ptr_gbl_pgtbl_cnt;
-	u32 i;
-	struct cpu_mmu_entry_ctrl entry = { 0, 0, NULL, NULL, 0 };
+    unsigned long *second;
+    unsigned long *first;
+    unsigned long *zeroeth;
 
-	/* For now assume 3-level page table */
-#ifdef CONFIG_RISCV_64
-	entry.num_levels = 3;
-#else
-	entry.num_levels = 2;
-#endif
+    second = (unsigned long *)to_load_pa(&xen_second_pagetable);
+    first = (unsigned long *)to_load_pa(&xen_first_pagetable);
+    zeroeth = (unsigned long *)to_load_pa(&xen_zeroeth_pagetable);
 
-	/* Init pgtbl_base, pgtbl_tree, and next_pgtbl */
-	entry.pgtbl_tree =
-		(int *)to_load_pa((unsigned long)&def_pgtbl_tree);
-	for (i = 0; i < PGTBL_INITIAL_TABLE_COUNT; i++) {
-		entry.pgtbl_tree[i] = -1;
-	}
-	entry.pgtbl_base = to_load_pa((unsigned long)&def_pgtbl);
-	entry.next_pgtbl = (unsigned long *)entry.pgtbl_base;
+    /* For now assume 3-level page table */
+    /* Map physical = logical
+     * Note: This mapping is used at boot time only
+     */
+    setup_pagetables(second, first, zeroeth, _load_start, _load_end, _load_start);
 
-	/* Init first pgtbl */
-	for (i = 0; i < PGTBL_TABLE_ENTCNT; i++) {
-		entry.next_pgtbl[i] = 0x0ULL;
-	}
-
-	entry.pgtbl_count++;
-	entry.next_pgtbl += PGTBL_TABLE_ENTCNT;
-
-	/* Map physical = logical
-	 * Note: This mapping is using at boot time only
-	 */
-	__setup_initial_pgtbl(&entry, load_start, load_end, load_start, true);
-
-	/* Map to logical addresses which are
-	 * covered by read-only linker sections
-	 * Note: This mapping is used at runtime
-	 */
-	SETUP_RO_SECTION(entry, text);
- 	SETUP_RO_SECTION(entry, init);
-	SETUP_RO_SECTION(entry, cpuinit);
-	SETUP_RO_SECTION(entry, spinlock);
-	SETUP_RO_SECTION(entry, rodata);
-
-	/* Map rest of logical addresses which are
-	 * not covered by read-only linker sections
-	 * Note: This mapping is used at runtime
-	 */
-	__setup_initial_pgtbl(&entry, exec_start, exec_end, load_start, true);
-
-        /* Leave gbl_pgtbl_cnt with the most recent pgtbl_count,
-         * this is for adding to this pagetable later.
-         */
-        // gbl_pgtbl_cnt = entry.pgtbl_count;
-	ptr_gbl_pgtbl_cnt = (u32 *)to_load_pa((unsigned long)&gbl_pgtbl_cnt);
-        *ptr_gbl_pgtbl_cnt = entry.pgtbl_count;
+    /* Map to logical addresses which are
+     * covered by read-only linker sections
+     * Note: This mapping is used at runtime
+     */
+    setup_pagetables(second, first, zeroeth, _load_start, _load_end, _load_start);
+    setup_pagetables(second, first, zeroeth, 
+                       to_exec_va(&_text_start),
+                       to_exec_va(&_text_end),
+                       to_load_pa(&_text_start));
+    setup_pagetables(second, first, zeroeth,
+                       to_exec_va(&_init_start),
+                       to_exec_va(&_init_end),
+                       to_load_pa(&_init_start));
+    setup_pagetables(second, first, zeroeth,
+                       to_exec_va(&_cpuinit_start),
+                       to_exec_va(&_cpuinit_end),
+                       to_load_pa(&_cpuinit_start));
+    setup_pagetables(second, first, zeroeth,
+                       to_exec_va(&_spinlock_start),
+                       to_exec_va(&_spinlock_end),
+                       to_load_pa(&_spinlock_start));
+    setup_pagetables(second, first, zeroeth,
+                       to_exec_va(&_rodata_start),
+                       to_exec_va(&_rodata_end),
+                       to_load_pa(&_rodata_start));
+    setup_pagetables(second, first, zeroeth, _exec_start, _exec_end, _load_start);
 }
