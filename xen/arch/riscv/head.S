@@ -4,6 +4,9 @@
 #include <asm/csr.h>
 #include <asm/config.h>
 
+.global _start
+.global _end
+
 ENTRY(start)
 	.section .entry, "ax", %progbits
 _start:
@@ -39,6 +42,8 @@ _start:
 	la	a6, _load_start
 	REG_S	a2, (a6)
 	la	a6, _load_end
+	REG_S	a3, (a6)
+	la	a6, _end
 	REG_S	a3, (a6)
 
 	/* Zero-out bss section */
@@ -138,6 +143,9 @@ _load_start:
 	 */
 	.globl _load_end
 _load_end:
+	RISCV_PTR 0x0
+
+_end:
 	RISCV_PTR 0x0
 
 	/*
