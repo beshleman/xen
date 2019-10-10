@@ -24,10 +24,10 @@
 #include <xen/sizes.h>
 #include <asm/setup.h>
 
-/* TODO: remove these if they're not needed */
-pte_t boot_pgtable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
+/* TODO: remove these if they're not needed pte_t boot_pgtable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 pte_t boot_first[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 pte_t boot_first_id[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
+*/
 
 /* Limits of the Xen heap */
 mfn_t xenheap_mfn_start __read_mostly = INVALID_MFN_INITIALIZER;
@@ -42,7 +42,8 @@ vaddr_t xenheap_virt_start __read_mostly;
  */
 unsigned long xen_second_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 static unsigned long xen_first_pagetable[PAGE_ENTRIES * 2] __attribute__((__aligned__(4096*2)));
-static unsigned long xen_zeroeth_pagetable[PAGE_ENTRIES * 5] __attribute__((__aligned__(4096)));
+static unsigned long xen_zeroeth_pagetable[PAGE_ENTRIES * 2] __attribute__((__aligned__(4096)));
+static unsigned long xenheap_first_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 
 /* Used by _setup_initial_pagetables() */
 extern unsigned long _text_start;
@@ -56,9 +57,17 @@ extern unsigned long _init_end;
 extern unsigned long _rodata_start;
 extern unsigned long _rodata_end;
 
+unsigned long xen_start;
+unsigned long xen_end;
+
 static paddr_t phys_offset;
 unsigned long max_page;
 unsigned long total_pages;
+
+void *__init arch_vmap_virt_end(void)
+{
+    return (void *)VMAP_VIRT_END;
+}
 
 static inline pte_t mfn_to_xen_entry(mfn_t mfn, unsigned attr)
 {
@@ -371,6 +380,44 @@ void setup_pagetables(unsigned long boot_phys_offset)
     /* TODO */
 }
 
+void setup_xenheap_mappings(unsigned long heap_start, unsigned long page_cnt)
+{
+    unsigned long frame_addr = heap_start;
+    unsigned long end = heap_start + (page_cnt << PAGE_SHIFT);
+    unsigned long index2, index1, index0;
+
+    while(frame_addr < end) {
+        index2 = (XENHEAP_VIRT_START & PGTBL_L2_INDEX_MASK) >> PGTBL_L2_INDEX_SHIFT;
+        index1 = (XENHEAP_VIRT_START & PGTBL_L1_INDEX_MASK) >> PGTBL_L1_INDEX_SHIFT;
+        index0 = (XENHEAP_VIRT_START & PGTBL_L0_INDEX_MASK) >> PGTBL_L0_INDEX_SHIFT;
+
+        /* Setup level2 table */
+        xen_second_pagetable[index2] = (unsigned long) &xenheap_first_pagetable[index1];
+        xen_second_pagetable[index2] = xen_second_pagetable[index2] >> PGTBL_PAGE_SIZE_SHIFT;
+        xen_second_pagetable[index2] = xen_second_pagetable[index2] << PGTBL_PTE_ADDR_SHIFT;
+        xen_second_pagetable[index2] |= PGTBL_PTE_VALID_MASK;
+        xen_second_pagetable[index2] |= PGTBL_PTE_VALID_MASK;
+
+        /* Setup level1 table */
+        xenheap_first_pagetable[index1] = frame_addr;
+        xenheap_first_pagetable[index1] = xenheap_first_pagetable[index1] >> PGTBL_PAGE_SIZE_SHIFT;
+        xenheap_first_pagetable[index1] = xenheap_first_pagetable[index1] << PGTBL_PTE_ADDR_SHIFT;
+        xenheap_first_pagetable[index1] |= PGTBL_PTE_VALID_MASK;
+        xenheap_first_pagetable[index1] |= PGTBL_PTE_EXECUTE_MASK;
+        xenheap_first_pagetable[index1] |= PGTBL_PTE_WRITE_MASK;
+        xenheap_first_pagetable[index1] |= PGTBL_PTE_READ_MASK;
+        xenheap_first_pagetable[index1] |= PGTBL_PTE_VALID_MASK;
+
+        frame_addr += PGTBL_L0_BLOCK_SIZE;
+    }
+
+    asm volatile ("sfence.vma");
+
+    xenheap_virt_end = XENHEAP_VIRT_START + (page_cnt * PAGE_SIZE);
+    xenheap_mfn_start = _mfn(heap_start >> PAGE_SHIFT);
+    xenheap_mfn_end = _mfn((heap_start >> PAGE_SHIFT) + page_cnt);
+}
+
 void __init clear_pagetables(unsigned long load_addr, unsigned long linker_addr)
 {
     unsigned long *p;
@@ -533,6 +580,9 @@ void __attribute__ ((section(".entry")))
 
     /* Enable the MMU and load the pagetable */
     csr_write(satp, (load_addr(xen_second_pagetable) >> PAGE_SHIFT) | SATP_MODE);
+
+    xen_start = load_addr_start;
+    xen_end = load_addr_end;
 }
 
 /*
