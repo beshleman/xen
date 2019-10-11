@@ -35,6 +35,11 @@ mfn_t xenheap_mfn_end __read_mostly;
 vaddr_t xenheap_virt_end __read_mostly;
 vaddr_t xenheap_virt_start __read_mostly;
 
+/* Limits of frametable */
+unsigned long frametable_virt_end __read_mostly;
+unsigned long frametable_base_pdx;
+
+
 /*
  * xen_second_pagetable is indexed with the VPN[2] page table entry field
  * xen_first_pagetable is accessed from the VPN[1] page table entry field
@@ -43,7 +48,6 @@ vaddr_t xenheap_virt_start __read_mostly;
 unsigned long xen_second_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 static unsigned long xen_first_pagetable[PAGE_ENTRIES * 2] __attribute__((__aligned__(4096*2)));
 static unsigned long xen_zeroeth_pagetable[PAGE_ENTRIES * 2] __attribute__((__aligned__(4096)));
-static unsigned long xenheap_first_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 
 /* Used by _setup_initial_pagetables() */
 extern unsigned long _text_start;
@@ -380,38 +384,53 @@ void setup_pagetables(unsigned long boot_phys_offset)
     /* TODO */
 }
 
-void setup_xenheap_mappings(unsigned long heap_start, unsigned long page_cnt)
+
+
+/* Creates megapages of 2MB size based on sv39 spec */
+void setup_gigapages(unsigned long *first_pagetable,
+                    unsigned long virtual_start, 
+                    unsigned long physical_start,
+                    unsigned long page_cnt)
 {
-    unsigned long frame_addr = heap_start;
-    unsigned long end = heap_start + (page_cnt << PAGE_SHIFT);
-    unsigned long index2, index1, index0;
+    unsigned long frame_addr = physical_start;
+    unsigned long end = physical_start + (page_cnt << PAGE_SHIFT);
+    unsigned long vaddr = virtual_start;
+    unsigned long *test_page = (unsigned long *) vaddr;
+    unsigned long pte;
+    unsigned long index2;
+    //unsigned long index1;
 
     while(frame_addr < end) {
-        index2 = (XENHEAP_VIRT_START & PGTBL_L2_INDEX_MASK) >> PGTBL_L2_INDEX_SHIFT;
-        index1 = (XENHEAP_VIRT_START & PGTBL_L1_INDEX_MASK) >> PGTBL_L1_INDEX_SHIFT;
-        index0 = (XENHEAP_VIRT_START & PGTBL_L0_INDEX_MASK) >> PGTBL_L0_INDEX_SHIFT;
+        index2 = (vaddr & PGTBL_L2_INDEX_MASK) >> PGTBL_L2_INDEX_SHIFT;
+        
+        /* Setup gigapage level2 table */
+        pte = frame_addr;
 
-        /* Setup level2 table */
-        xen_second_pagetable[index2] = (unsigned long) &xenheap_first_pagetable[index1];
-        xen_second_pagetable[index2] = xen_second_pagetable[index2] >> PGTBL_PAGE_SIZE_SHIFT;
-        xen_second_pagetable[index2] = xen_second_pagetable[index2] << PGTBL_PTE_ADDR_SHIFT;
-        xen_second_pagetable[index2] |= PGTBL_PTE_VALID_MASK;
-        xen_second_pagetable[index2] |= PGTBL_PTE_VALID_MASK;
+        /* Align ppn */
+        pte &= PGTBL_L2_MAP_MASK;
 
-        /* Setup level1 table */
-        xenheap_first_pagetable[index1] = frame_addr;
-        xenheap_first_pagetable[index1] = xenheap_first_pagetable[index1] >> PGTBL_PAGE_SIZE_SHIFT;
-        xenheap_first_pagetable[index1] = xenheap_first_pagetable[index1] << PGTBL_PTE_ADDR_SHIFT;
-        xenheap_first_pagetable[index1] |= PGTBL_PTE_VALID_MASK;
-        xenheap_first_pagetable[index1] |= PGTBL_PTE_EXECUTE_MASK;
-        xenheap_first_pagetable[index1] |= PGTBL_PTE_WRITE_MASK;
-        xenheap_first_pagetable[index1] |= PGTBL_PTE_READ_MASK;
-        xenheap_first_pagetable[index1] |= PGTBL_PTE_VALID_MASK;
+        /* Shifts to turn into pte */
+        pte =  (pte >> PGTBL_PAGE_SIZE_SHIFT) << PGTBL_PTE_ADDR_SHIFT;
+        pte |= PGTBL_PTE_VALID_MASK;
+        pte |= PGTBL_PTE_EXECUTE_MASK;
+        pte |= PGTBL_PTE_WRITE_MASK;
+        pte |= PGTBL_PTE_READ_MASK;
+        xen_second_pagetable[index2] = pte;
 
-        frame_addr += PGTBL_L0_BLOCK_SIZE;
+        frame_addr += PGTBL_L2_BLOCK_SIZE;
+        vaddr += PGTBL_L2_BLOCK_SIZE;
     }
 
     asm volatile ("sfence.vma");
+    *test_page = 0xffff;
+}
+
+void setup_xenheap_mappings(unsigned long heap_start, unsigned long page_cnt)
+{
+    setup_gigapages(xen_first_pagetable,
+                    XENHEAP_VIRT_START, 
+                    heap_start,
+                    page_cnt);
 
     xenheap_virt_end = XENHEAP_VIRT_START + (page_cnt * PAGE_SIZE);
     xenheap_mfn_start = _mfn(heap_start >> PAGE_SHIFT);
@@ -583,6 +602,33 @@ void __attribute__ ((section(".entry")))
 
     xen_start = load_addr_start;
     xen_end = load_addr_end;
+}
+
+/* Map a frame table to cover physical addresses ps through pe */
+void __init setup_frametable_mappings(paddr_t ps, paddr_t pe)
+{
+    unsigned long nr_pdxs = mfn_to_pdx(mfn_add(maddr_to_mfn(pe), -1)) -
+                            mfn_to_pdx(maddr_to_mfn(ps)) + 1;
+    unsigned long frametable_size = nr_pdxs * sizeof(struct page_info);
+    mfn_t base_mfn;
+
+    frametable_base_pdx = mfn_to_pdx(maddr_to_mfn(ps));
+    /* Megapages for sv39 are 2MB so round up to 2MB */
+    frametable_size = ROUNDUP(frametable_size, MB(2));
+    base_mfn = alloc_boot_pages(frametable_size >> PAGE_SHIFT, 2<<20);
+
+/*
+    create_mappings(xen_second, FRAMETABLE_VIRT_START, mfn_x(base_mfn),
+                    frametable_size >> PAGE_SHIFT, mapping_size);
+*/
+    setup_gigapages(xen_first_pagetable, FRAMETABLE_VIRT_START,
+                    (unsigned long) mfn_x(base_mfn), nr_pdxs);
+
+    memset(&frame_table[0], 0, nr_pdxs * sizeof(struct page_info));
+    memset(&frame_table[nr_pdxs], -1,
+           frametable_size - (nr_pdxs * sizeof(struct page_info)));
+
+    frametable_virt_end = FRAMETABLE_VIRT_START + (nr_pdxs * sizeof(struct page_info));
 }
 
 /*

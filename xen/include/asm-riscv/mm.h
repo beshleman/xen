@@ -22,6 +22,8 @@
  */
 #define PFN_ORDER(_pfn) ((_pfn)->v.free.order)
 
+extern unsigned long frametable_base_pdx;
+
 struct page_info
 {
     /* Each frame can be threaded onto a doubly-linked list. */
@@ -274,12 +276,15 @@ static inline bool arch_mfn_in_directmap(unsigned long mfn)
 
 void setup_xenheap_mappings(unsigned long heap_start, unsigned long page_cnt);
 
+void setup_frametable_mappings(paddr_t ps, paddr_t pe);
+
 void __attribute__ ((section(".entry"))) setup_initial_pagetables(unsigned long *second,
                                                           unsigned long *first,
                                                           unsigned long *zeroeth,
                                                           unsigned long map_start,
                                                           unsigned long map_end,
                                                           unsigned long pa_start);
+
 
 #endif /*  __ARCH_RISCV_MM__ */
 /*
