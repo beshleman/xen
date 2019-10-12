@@ -46,8 +46,9 @@ unsigned long frametable_base_pdx;
  * xen_zeroeth_pagetable is accessed from the VPN[0] page table entry field
  */
 unsigned long xen_second_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
-static unsigned long xen_first_pagetable[PAGE_ENTRIES * 2] __attribute__((__aligned__(4096*2)));
-static unsigned long xen_zeroeth_pagetable[PAGE_ENTRIES * 2] __attribute__((__aligned__(4096)));
+static unsigned long xen_first_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
+static unsigned long xen_zeroeth_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
+static unsigned long xen_heap_megapages[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 
 /* Used by _setup_initial_pagetables() */
 extern unsigned long _text_start;
@@ -63,6 +64,8 @@ extern unsigned long _rodata_end;
 
 unsigned long xen_start;
 unsigned long xen_end;
+unsigned long xen_link_start;
+unsigned long xen_link_end;
 
 static paddr_t phys_offset;
 unsigned long max_page;
@@ -385,8 +388,50 @@ void setup_pagetables(unsigned long boot_phys_offset)
 }
 
 
+#define boot_phys(linkaddr) ((linkaddr) - xen_link_start + xen_start)
 
 /* Creates megapages of 2MB size based on sv39 spec */
+/* TODO: make page_cnt not expect 4KB pages, change to 2MB pages? */
+void setup_heap_megapages(
+                    unsigned long virtual_start, 
+                    unsigned long physical_start,
+                    unsigned long page_cnt)
+{
+    unsigned long frame_addr = physical_start;
+    unsigned long end = physical_start + (page_cnt << PAGE_SHIFT);
+    unsigned long vaddr = virtual_start;
+    unsigned long pte;
+    unsigned long index2, index1;
+
+    index2 = (vaddr & PGTBL_L2_INDEX_MASK) >> PGTBL_L2_INDEX_SHIFT;
+    pte = boot_phys((unsigned long)&xen_heap_megapages);
+    /* Remove the offset part of the address and then make room for the permission bits */
+    pte =  (pte >> PGTBL_PAGE_SIZE_SHIFT) << PGTBL_PTE_ADDR_SHIFT;
+    pte |= PGTBL_PTE_VALID_MASK;
+    xen_second_pagetable[index2] = pte;
+
+    while(frame_addr < end) {
+        index1 = (vaddr & PGTBL_L1_INDEX_MASK) >> PGTBL_L1_INDEX_SHIFT;
+
+        /* TODO: make error if frame_addr and end or not aligned */
+        /* Remove any bits that don't point to 2MB aligned pages */
+        pte = frame_addr & (PGTBL_L1_MAP_MASK | PGTBL_L2_MAP_MASK);
+        pte =  (pte >> PGTBL_PAGE_SIZE_SHIFT) << PGTBL_PTE_ADDR_SHIFT;
+        pte |= PGTBL_PTE_VALID_MASK;
+        pte |= PGTBL_PTE_EXECUTE_MASK;
+        pte |= PGTBL_PTE_WRITE_MASK;
+        pte |= PGTBL_PTE_READ_MASK;
+        xen_heap_megapages[index1] = pte;
+
+        frame_addr += PGTBL_L1_BLOCK_SIZE;
+        vaddr += PGTBL_L1_BLOCK_SIZE;
+    }
+
+    asm volatile ("sfence.vma");
+}
+
+/* Creates gigapages of 1GB size based on sv39 spec */
+/* TODO: make page_cnt not expect 4KB pages, change to 1GB pages? */
 void setup_gigapages(
                     unsigned long virtual_start, 
                     unsigned long physical_start,
@@ -397,7 +442,6 @@ void setup_gigapages(
     unsigned long vaddr = virtual_start;
     unsigned long pte;
     unsigned long index2;
-    //unsigned long index1;
 
     while(frame_addr < end) {
         index2 = (vaddr & PGTBL_L2_INDEX_MASK) >> PGTBL_L2_INDEX_SHIFT;
@@ -405,7 +449,8 @@ void setup_gigapages(
         /* Setup gigapage level2 table */
         pte = frame_addr;
 
-        /* Align ppn */
+        /* TODO: Change this to be a BUG_ON() if not aligned */
+        /* Align addr to 1GB */
         pte &= PGTBL_L2_MAP_MASK;
 
         /* Shifts to turn into pte */
@@ -425,10 +470,9 @@ void setup_gigapages(
 
 void setup_xenheap_mappings(unsigned long heap_start, unsigned long page_cnt)
 {
-    setup_gigapages(
-                    XENHEAP_VIRT_START, 
-                    heap_start,
-                    page_cnt);
+    setup_heap_megapages(XENHEAP_VIRT_START, 
+                         heap_start,
+                         page_cnt);
 
     xenheap_virt_end = XENHEAP_VIRT_START + (page_cnt * PAGE_SIZE);
     xenheap_mfn_start = _mfn(heap_start >> PAGE_SHIFT);
@@ -600,6 +644,8 @@ void __attribute__ ((section(".entry")))
 
     xen_start = load_addr_start;
     xen_end = load_addr_end;
+    xen_link_start = linker_addr_start;
+    xen_link_end = linker_addr_end;
 }
 
 /* Map a frame table to cover physical addresses ps through pe */
@@ -615,10 +661,6 @@ void __init setup_frametable_mappings(paddr_t ps, paddr_t pe)
     frametable_size = ROUNDUP(frametable_size, 2 << 20);
     base_mfn = alloc_boot_pages(frametable_size >> PAGE_SHIFT, 2<<(20-12));
 
-/*
-    create_mappings(xen_second, FRAMETABLE_VIRT_START, mfn_x(base_mfn),
-                    frametable_size >> PAGE_SHIFT, mapping_size);
-*/
     setup_gigapages(FRAMETABLE_VIRT_START,
                     ((unsigned long) mfn_x(base_mfn)) << PAGE_SHIFT, nr_pdxs);
 
