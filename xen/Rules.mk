@@ -45,7 +45,7 @@ ALL_OBJS-$(CONFIG_CRYPTO)   += $(BASEDIR)/crypto/built_in.o
 CFLAGS_UBSAN :=
 
 ifeq ($(CONFIG_DEBUG),y)
-CFLAGS += -O1
+CFLAGS += -Og
 else
 CFLAGS += -O2
 endif
@@ -60,7 +60,7 @@ CFLAGS += -nostdinc -fno-builtin -fno-common
 CFLAGS += -Werror -Wredundant-decls -Wno-pointer-arith
 $(call cc-option-add,CFLAGS,CC,-Wvla)
 CFLAGS += -pipe -D__XEN__ -include $(BASEDIR)/include/xen/config.h
-CFLAGS-$(CONFIG_DEBUG_INFO) += -g
+CFLAGS-$(CONFIG_DEBUG_INFO) += -g3
 CFLAGS += '-D__OBJECT_FILE__="$@"'
 
 ifneq ($(clang),y)

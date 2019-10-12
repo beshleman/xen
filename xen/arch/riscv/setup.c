@@ -58,6 +58,65 @@ void arch_get_xen_caps(xen_capabilities_info_t *info)
     safe_strcat(*info, s);
 }
 
+struct memory_bank {
+    unsigned long start;
+    unsigned long size;
+};
+
+struct memory_bank banks[] = {
+    /* memory-node from dts.  Ram */
+
+#define TEMP_OFF 0x0300000
+    /* Hardcode to be offset from Xen load addr space */
+    {.start = 0x00080000000 + TEMP_OFF, .size=0x8000000 - TEMP_OFF},
+};
+
+static int nr_banks = (int) ARRAY_SIZE(banks);
+
+static void __init init_pdx(void)
+{
+    paddr_t bank_start, bank_size, bank_end;
+
+    /*
+     * Arm does not have any restrictions on the bits to compress. Pass 0 to
+     * let the common code further restrict the mask.
+     *
+     * If the logic changes in pfn_pdx_hole_setup we might have to
+     * update this function too.
+     */
+    uint64_t mask = pdx_init_mask(0x0);
+    int bank;
+
+    for ( bank = 0 ; bank < nr_banks; bank++ )
+    {
+        bank_start = banks[bank].start;
+        bank_size = banks[bank].size;
+
+        mask |= bank_start | pdx_region_mask(bank_start, bank_size);
+    }
+
+    for ( bank = 0 ; bank < nr_banks; bank++ )
+    {
+        bank_start = banks[bank].start;
+        bank_size = banks[bank].size;
+
+        if (~mask & pdx_region_mask(bank_start, bank_size))
+            mask = 0;
+    }
+
+    pfn_pdx_hole_setup(mask >> PAGE_SHIFT);
+
+    for ( bank = 0 ; bank < nr_banks; bank++ )
+    {
+        bank_start = banks[bank].start;
+        bank_size = banks[bank].size;
+        bank_end = bank_start + bank_size;
+
+        set_pdx_range(paddr_to_pfn(bank_start),
+                      paddr_to_pfn(bank_end));
+    }
+}
+
 static void __init setup_mm(void)
 {
     paddr_t ram_start, ram_end, ram_size;
@@ -65,6 +124,7 @@ static void __init setup_mm(void)
     unsigned long ram_pages;
     unsigned long heap_pages, xenheap_pages, domheap_pages;
     unsigned long boot_mfn_start, boot_mfn_end;
+    int i;
 
     /*
     This is the memory layout for the qemu/virt board.
@@ -88,10 +148,27 @@ static void __init setup_mm(void)
     */
     /* These values are hardcoded for the riscv-virt QEMU device */
     /* How much ram do we have? */
-    ram_start = 0x80000000UL; /* TODO: extract from fdt*/
-    ram_size  = 0x08000000UL; /* TODO: extract from fdt */
-                //0x3fffffffUL
+    init_pdx();
+
+    /* 0x80000000 - 0x80200000 is PMP protected by OpenSBI
+     * so exclude it from the ram range (any attempt at using it
+     * will trigger an access fault
+     */
+
+    ram_start = banks[0].start;
+    ram_size  = banks[0].size;
     ram_end   = ram_start + ram_size;
+
+    for ( i = 1; i < nr_banks; i++ )
+    {
+        unsigned long bank_start = banks[i].start;
+        unsigned long bank_size = banks[i].size;
+        unsigned long bank_end = bank_start + bank_size;
+
+        ram_size  = ram_size + bank_size;
+        ram_start = min(ram_start,bank_start);
+        ram_end   = max(ram_end,bank_end);
+    }
 
     /* How many pages of ram? */
     total_pages = ram_pages = ram_size >> PAGE_SHIFT;
@@ -126,8 +203,9 @@ static void __init setup_mm(void)
 
     /*
      * Need a single mapped page for populating bootmem_region_list.
+     * Plus other pages (TODO: calculate from fdt)
      */
-    boot_mfn_start = mfn_x(xenheap_mfn_end) - 1;
+    boot_mfn_start = mfn_x(xenheap_mfn_end) - ((30 << 20) >> PAGE_SHIFT) - 1;
     boot_mfn_end = mfn_x(xenheap_mfn_end);
 
     init_boot_pages(pfn_to_paddr(boot_mfn_start), pfn_to_paddr(boot_mfn_end));
@@ -135,7 +213,8 @@ static void __init setup_mm(void)
     /* TODO: Add non-xenheap memory, use dt for unreserved space */
 
     max_page = PFN_DOWN(ram_end);
-    // TODO: setup_frametable_mappings(0, 0x80000000UL);
+
+    setup_frametable_mappings(ram_start, ram_end);
 
     /* Add xenheap memory that was not already added to the boot
        allocator. */

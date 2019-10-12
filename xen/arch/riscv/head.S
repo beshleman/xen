@@ -5,7 +5,6 @@
 #include <asm/config.h>
 
 .global _start
-.global _end
 
 ENTRY(start)
 	.section .entry, "ax", %progbits
@@ -145,6 +144,7 @@ _load_start:
 _load_end:
 	RISCV_PTR 0x0
 
+        .globl _end
 _end:
 	RISCV_PTR 0x0
 

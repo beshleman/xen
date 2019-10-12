@@ -79,7 +79,16 @@
 #define VMAP_VIRT_START  GB(1)
 #define VMAP_VIRT_END    (VMAP_VIRT_START + GB(1))
 
-#define FRAMETABLE_VIRT_START  GB(32)
+#define USE_GIGAPAGES
+
+#ifdef USE_GIGAPAGES
+    /* TODO: this is only for testing */
+    #define FRAMETABLE_VIRT_START  (GB(32) + 0x00300000)
+    
+#else
+    #define FRAMETABLE_VIRT_START  GB(32)
+#endif
+
 #define FRAMETABLE_SIZE        GB(32)
 #define FRAMETABLE_NR          (FRAMETABLE_SIZE / sizeof(*frame_table))
 #define FRAMETABLE_VIRT_END    (FRAMETABLE_VIRT_START + FRAMETABLE_SIZE - 1)

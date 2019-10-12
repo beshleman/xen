@@ -387,7 +387,7 @@ void setup_pagetables(unsigned long boot_phys_offset)
 
 
 /* Creates megapages of 2MB size based on sv39 spec */
-void setup_gigapages(unsigned long *first_pagetable,
+void setup_gigapages(
                     unsigned long virtual_start, 
                     unsigned long physical_start,
                     unsigned long page_cnt)
@@ -395,7 +395,6 @@ void setup_gigapages(unsigned long *first_pagetable,
     unsigned long frame_addr = physical_start;
     unsigned long end = physical_start + (page_cnt << PAGE_SHIFT);
     unsigned long vaddr = virtual_start;
-    unsigned long *test_page = (unsigned long *) vaddr;
     unsigned long pte;
     unsigned long index2;
     //unsigned long index1;
@@ -422,12 +421,11 @@ void setup_gigapages(unsigned long *first_pagetable,
     }
 
     asm volatile ("sfence.vma");
-    *test_page = 0xffff;
 }
 
 void setup_xenheap_mappings(unsigned long heap_start, unsigned long page_cnt)
 {
-    setup_gigapages(xen_first_pagetable,
+    setup_gigapages(
                     XENHEAP_VIRT_START, 
                     heap_start,
                     page_cnt);
@@ -614,15 +612,15 @@ void __init setup_frametable_mappings(paddr_t ps, paddr_t pe)
 
     frametable_base_pdx = mfn_to_pdx(maddr_to_mfn(ps));
     /* Megapages for sv39 are 2MB so round up to 2MB */
-    frametable_size = ROUNDUP(frametable_size, MB(2));
-    base_mfn = alloc_boot_pages(frametable_size >> PAGE_SHIFT, 2<<20);
+    frametable_size = ROUNDUP(frametable_size, 2 << 20);
+    base_mfn = alloc_boot_pages(frametable_size >> PAGE_SHIFT, 2<<(20-12));
 
 /*
     create_mappings(xen_second, FRAMETABLE_VIRT_START, mfn_x(base_mfn),
                     frametable_size >> PAGE_SHIFT, mapping_size);
 */
-    setup_gigapages(xen_first_pagetable, FRAMETABLE_VIRT_START,
-                    (unsigned long) mfn_x(base_mfn), nr_pdxs);
+    setup_gigapages(FRAMETABLE_VIRT_START,
+                    ((unsigned long) mfn_x(base_mfn)) << PAGE_SHIFT, nr_pdxs);
 
     memset(&frame_table[0], 0, nr_pdxs * sizeof(struct page_info));
     memset(&frame_table[nr_pdxs], -1,
