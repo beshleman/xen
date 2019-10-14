@@ -277,6 +277,7 @@ static inline bool arch_mfn_in_directmap(unsigned long mfn)
 void setup_xenheap_mappings(unsigned long heap_start, unsigned long page_cnt);
 
 void setup_frametable_mappings(paddr_t ps, paddr_t pe);
+void setup_domheap_pagetables(void);
 
 void __attribute__ ((section(".entry"))) setup_initial_pagetables(unsigned long *second,
                                                           unsigned long *first,

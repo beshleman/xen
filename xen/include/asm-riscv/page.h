@@ -111,6 +111,9 @@
 #define PGTBL_PTE_VALID_MASK                0x0000000000000001ULL
 #define PGTBL_PTE_VALID_SHIFT               0
 
+#define pte_is_valid(pte)                ((pte) & PGTBL_PTE_VALID_MASK)
+#define pte_get_mfn(pte)                 (((pte) & PGTBL_PTE_ADDR_MASK) >> PGTBL_PTE_ADDR_SHIFT)
+
 /* Calculate the offsets into the pagetables for a given VA */
 #define zeroeth_linear_offset(va) ((va) >> PGTBL_L0_INDEX_SHIFT)
 #define first_linear_offset(va) ((va) >> PGTBL_L1_INDEX_SHIFT)

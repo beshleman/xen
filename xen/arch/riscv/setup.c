@@ -201,6 +201,8 @@ static void __init setup_mm(void)
     heap_start = ram_end - (xenheap_pages << PAGE_SHIFT);
     setup_xenheap_mappings(heap_start, xenheap_pages);
 
+    setup_domheap_pagetables();
+
     /*
      * Need a single mapped page for populating bootmem_region_list.
      * Plus other pages (TODO: calculate from fdt)
@@ -232,7 +234,10 @@ void __init start_xen(void)
 
     setup_virtual_regions(NULL, NULL);
     setup_mm();
+    end_boot_allocator();
+
     vm_init();
+
 
     ns16550.io_base = 0x10000000;
     ns16550.irq     = 10;
