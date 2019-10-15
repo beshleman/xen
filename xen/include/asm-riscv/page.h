@@ -1,4 +1,5 @@
 /*
+    paddr = (paddr >> PGTBL_PAGE_SIZE_SHIFT) << PGTBL_PTE_ADDR_SHIFT;
  * Copyright (C) 2009 Chen Liqin <liqin.chen@sunplusct.com>
  * Copyright (C) 2012 Regents of the University of California
  * Copyright (C) 2017 SiFive
@@ -111,9 +112,6 @@
 #define PGTBL_PTE_VALID_MASK                0x0000000000000001ULL
 #define PGTBL_PTE_VALID_SHIFT               0
 
-#define pte_is_valid(pte)                ((pte) & PGTBL_PTE_VALID_MASK)
-#define pte_get_mfn(pte)                 (((pte) & PGTBL_PTE_ADDR_MASK) >> PGTBL_PTE_ADDR_SHIFT)
-
 /* Calculate the offsets into the pagetables for a given VA */
 #define zeroeth_linear_offset(va) ((va) >> PGTBL_L0_INDEX_SHIFT)
 #define first_linear_offset(va) ((va) >> PGTBL_L1_INDEX_SHIFT)
@@ -126,10 +124,10 @@
 #define second_table_offset(va) TABLE_OFFSET(second_linear_offset(va))
 #define third_table_offset(va)  TABLE_OFFSET(third_linear_offset(va))
 
-#define pgtbl_zeroeth_index(va) zeroeth_linear_offset((va) & PGTBL_L0_INDEX_MASK)
-#define pgtbl_first_index(va) first_linear_offset((va) & PGTBL_L1_INDEX_MASK)
-#define pgtbl_second_index(va) second_linear_offset((va) & PGTBL_L2_INDEX_MASK)
-#define pgtbl_third_index(va) third_linear_offset((va) & PGTBL_L3_INDEX_MASK)
+#define pagetable_zeroeth_index(va) zeroeth_linear_offset((va) & PGTBL_L0_INDEX_MASK)
+#define pagetable_first_index(va) first_linear_offset((va) & PGTBL_L1_INDEX_MASK)
+#define pagetable_second_index(va) second_linear_offset((va) & PGTBL_L2_INDEX_MASK)
+#define pagetable_third_index(va) third_linear_offset((va) & PGTBL_L3_INDEX_MASK)
 
 #ifndef __ASSEMBLY__
 
@@ -222,10 +220,41 @@ typedef struct {
 	unsigned long pgd;
 } pgd_t;
 
-/* Page Table entry */
 typedef struct {
-	unsigned long pte;
-} pte_t;
+    unsigned long valid: 1;
+    unsigned long readable: 1;
+    unsigned long writable: 1;
+    unsigned long executable: 1;
+    unsigned long user: 1;
+    unsigned long global: 1;
+    unsigned long accessed: 1;
+    unsigned long dirty: 1;
+    unsigned long rsw: 2;
+} __attribute__((packed)) pte_flags_t;
+
+typedef struct {
+    pte_flags_t flags;
+    /* mfn = RISC-V spec's PPN1 and PPN0 */
+    unsigned long ppn: 18;
+} __attribute__((packed)) sv32_pte_t;
+
+typedef struct {
+    pte_flags_t flags;
+    /* mfn = RISC-V spec's PPN2, PPN1, and PPN0 */
+    unsigned long ppn: 27;
+} __attribute__((packed)) sv39_pte_t;
+
+typedef struct {
+    pte_flags_t flags;
+    /* mfn = RISC-V spec's PPN3, PPN2, PPN1, and PPN0 */
+    unsigned long ppn: 36;
+} __attribute__((packed)) sv48_pte_t;
+
+/* Page Table entry */
+typedef union {
+    uint64_t bits;
+    sv39_pte_t pte;
+} __attribute__((packed)) pte_t;
 
 typedef struct {
 	unsigned long pgprot;
@@ -233,9 +262,18 @@ typedef struct {
 
 typedef struct page *pgtable_t;
 
-#define pte_val(x)	((x).pte)
+#define pte_val(x)	((x).bits)
 #define pgd_val(x)	((x).pgd)
 #define pgprot_val(x)	((x).pgprot)
+#define pte_is_valid(pte_)                ((pte_).pte.flags.valid)
+#define pte_get_mfn(pte_)                   (pte_.pte.ppn)
+
+#define MEGAPAGE_MASK (PGTBL_L1_MAP_MASK | PGTBL_L2_MAP_MASK)
+#define GIGAPAGE_MASK PGTBL_L2_MAP_MASK
+
+#define paddr_to_ppn(x) (((x) >> PGTBL_PAGE_SIZE_SHIFT) << PGTBL_PTE_ADDR_SHIFT)
+#define paddr_to_megapage_ppn(x) paddr_to_ppn((x) & MEGAPAGE_MASK)
+#define paddr_to_gigapage_ppn(x) paddr_to_ppn((x) & GIGAPAGE_MASK)
 
 #define __pte(x)	((pte_t) { (x) })
 #define __pgd(x)	((pgd_t) { (x) })

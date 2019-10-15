@@ -69,11 +69,11 @@ unsigned long frametable_base_pdx;
  * xen_first_pagetable is accessed from the VPN[1] page table entry field
  * xen_zeroeth_pagetable is accessed from the VPN[0] page table entry field
  */
-unsigned long xen_second_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
-static unsigned long xen_first_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
-static unsigned long xen_zeroeth_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
-static unsigned long xen_heap_megapages[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
-static unsigned long xen_domheap_megapages[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
+pte_t xen_second_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
+static pte_t xen_first_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
+static pte_t xen_zeroeth_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
+static pte_t xen_heap_megapages[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
+static pte_t xen_domheap_megapages[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 
 #define THIS_CPU_PGTABLE xen_second_pagetable
 
@@ -98,25 +98,27 @@ paddr_t phys_offset;
 unsigned long max_page;
 unsigned long total_pages;
 
+static inline pte_t mfn_to_pte(mfn_t mfn)
+{
+   return (pte_t) { .pte.ppn = mfn_x(mfn) };
+}
+
+
 void *__init arch_vmap_virt_end(void)
 {
     return (void *)VMAP_VIRT_END;
 }
 
-static inline pte_t mfn_to_xen_entry(mfn_t mfn, unsigned attr)
+static inline pte_t mfn_to_xen_entry(mfn_t mfn)
 {
-	pte_t pte;
-
-	pte.pte = _PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | _PAGE_EXEC;
-
-	return pte;
+    return (pte_t) { .pte.ppn = mfn_x(mfn) };
 }
 
 static inline pte_t pte_of_xenaddr(vaddr_t va)
 {
     paddr_t ma = va + phys_offset;
 
-    return mfn_to_xen_entry(maddr_to_mfn(ma), MT_NORMAL);
+    return mfn_to_xen_entry(maddr_to_mfn(ma));
 }
 
 /* Map a 4k page in a fixmap entry */
@@ -146,10 +148,10 @@ void unmap_domain_page_global(const void *va)
 void *map_domain_page(mfn_t mfn)
 {
     unsigned long flags;
-    unsigned long *map = this_cpu(xen_dommap);
+    pte_t *map = this_cpu(xen_dommap);
     unsigned long slot_mfn = mfn_x(mfn) & ~PAGE_MASK;
     vaddr_t va;
-    unsigned long pte;
+    pte_t pte;
     int i, slot;
 
     local_irq_save(flags);
@@ -167,7 +169,7 @@ void *map_domain_page(mfn_t mfn)
           slot = (slot + 1) % DOMHEAP_ENTRIES, i++ )
     {
             /* Commandeer this 2MB slot */
-            pte = mfn_to_xen_entry(_mfn(slot_mfn), MT_NORMAL);
+            pte = mfn_to_xen_entry(_mfn(slot_mfn));
             write_pte(map + slot, pte);
             break;
     }
@@ -192,7 +194,7 @@ void *map_domain_page(mfn_t mfn)
 void unmap_domain_page(const void *va)
 {
     unsigned long flags;
-    unsigned long *map = this_cpu(xen_dommap);
+    pte_t *map = this_cpu(xen_dommap);
     int slot = ((unsigned long) va - DOMHEAP_VIRT_START) >> PGTBL_L1_INDEX_SHIFT;
 
     local_irq_save(flags);
@@ -238,31 +240,33 @@ enum xenmap_operation {
     RESERVE
 };
 
-static int create_xen_table(unsigned long *entry)
+static int create_xen_table(pte_t *entry)
 {
     void *p;
-    unsigned long pte;
+    pte_t pte;
 
     p = alloc_xenheap_page();
     if ( p == NULL )
         return -ENOMEM;
 
     clear_page(p);
-    pte = mfn_to_xen_entry(virt_to_mfn(p), MT_NORMAL);
-    pte &= ~(PGTBL_PTE_READ_MASK | PGTBL_PTE_WRITE_MASK | PGTBL_PTE_EXECUTE_MASK);
-    pte |= PGTBL_PTE_VALID_MASK;
+    pte = mfn_to_xen_entry(maddr_to_mfn((unsigned long)p));
+    pte.pte.flags.readable = 1;
+    pte.pte.flags.writable = 1;
+    pte.pte.flags.executable = 1;
+    pte.pte.flags.valid = 1;
     /* Entries pointing to tables have their permissions set to 0 */
     write_pte(entry, pte);
     return 0;
 }
 
 
-static unsigned long *xen_map_table(mfn_t mfn)
+static pte_t *xen_map_table(mfn_t mfn)
 {
     return map_domain_page(mfn);
 }
 
-static void xen_unmap_table(const unsigned long *table)
+static void xen_unmap_table(const pte_t *table)
 {
     unmap_domain_page(table);
 }
@@ -281,9 +285,9 @@ static void xen_unmap_table(const unsigned long *table)
  *  XEN_TABLE_SUPER_PAGE: The next entry points to a superpage.
  */
 static int xen_pt_next_level(unsigned int level,
-                             unsigned long **table, unsigned int offset)
+                             pte_t **table, unsigned int offset)
 {
-    unsigned long *entry;
+    pte_t *entry;
     int ret;
 
     entry = *table + offset;
@@ -315,7 +319,7 @@ static int xen_pt_next_level(unsigned int level,
     return XEN_TABLE_NORMAL_PAGE;
 }
 
-static bool xen_pt_check_entry(unsigned long entry, mfn_t mfn, unsigned int flags)
+static bool xen_pt_check_entry(pte_t entry, mfn_t mfn, unsigned int flags)
 {
     (void) entry;
     (void) mfn;
@@ -333,8 +337,8 @@ static int xen_pt_update_entry(mfn_t root, unsigned long virt,
     unsigned int level;
     /* We only support 4KB mapping (i.e level 3) for now */
     unsigned int target = 3;
-    unsigned long *table;
-    unsigned long pte, *entry;
+    pte_t *table;
+    pte_t pte, *entry;
 
     /* convenience aliases */
     DECLARE_OFFSETS(offsets, (paddr_t)virt);
@@ -719,36 +723,30 @@ unsigned long get_upper_mfn_bound(void)
 
 /* Creates megapages of 2MB size based on sv39 spec */
 /* TODO: make page_cnt not expect 4KB pages, change to 2MB pages? */
-void setup_heap_megapages(
-                    unsigned long virtual_start, 
-                    unsigned long physical_start,
-                    unsigned long page_cnt)
+ void setup_heap_megapages(unsigned long virtual_start, 
+                           unsigned long physical_start,
+                           unsigned long page_cnt)
 {
     unsigned long frame_addr = physical_start;
     unsigned long end = physical_start + (page_cnt << PAGE_SHIFT);
     unsigned long vaddr = virtual_start;
-    unsigned long pte;
-    unsigned long index2, index1;
+    unsigned long paddr;
+    pte_t *pte;
 
-    index2 = (vaddr & PGTBL_L2_INDEX_MASK) >> PGTBL_L2_INDEX_SHIFT;
-    pte = boot_phys((unsigned long)&xen_heap_megapages);
-    /* Remove the offset part of the address and then make room for the permission bits */
-    pte =  (pte >> PGTBL_PAGE_SIZE_SHIFT) << PGTBL_PTE_ADDR_SHIFT;
-    pte |= PGTBL_PTE_VALID_MASK;
-    xen_second_pagetable[index2] = pte;
+    /* TODO: BUG_ON physical start is not megapage aligned */
+
+    paddr = boot_phys((unsigned long)&xen_heap_megapages);
+    pte = &xen_second_pagetable[pagetable_second_index(vaddr)];
+    pte->pte.ppn = paddr_to_ppn(paddr);
+    pte->pte.flags.valid = 1;
 
     while(frame_addr < end) {
-        index1 = (vaddr & PGTBL_L1_INDEX_MASK) >> PGTBL_L1_INDEX_SHIFT;
-
-        /* TODO: make error if frame_addr and end or not aligned */
-        /* Remove any bits that don't point to 2MB aligned pages */
-        pte = frame_addr & (PGTBL_L1_MAP_MASK | PGTBL_L2_MAP_MASK);
-        pte =  (pte >> PGTBL_PAGE_SIZE_SHIFT) << PGTBL_PTE_ADDR_SHIFT;
-        pte |= PGTBL_PTE_VALID_MASK;
-        pte |= PGTBL_PTE_EXECUTE_MASK;
-        pte |= PGTBL_PTE_WRITE_MASK;
-        pte |= PGTBL_PTE_READ_MASK;
-        xen_heap_megapages[index1] = pte;
+        pte = &xen_heap_megapages[pagetable_first_index(vaddr)];
+        pte->pte.ppn = paddr_to_megapage_ppn(paddr);
+        pte->pte.flag.valid = 1;
+        pte->pte.flag.readable = 1;
+        pte->pte.flag.writable = 1;
+        pte->pte.flag.executable = 1;
 
         frame_addr += PGTBL_L1_BLOCK_SIZE;
         vaddr += PGTBL_L1_BLOCK_SIZE;
@@ -764,29 +762,20 @@ void setup_gigapages(
                     unsigned long physical_start,
                     unsigned long page_cnt)
 {
-    unsigned long frame_addr = physical_start;
     unsigned long end = physical_start + (page_cnt << PAGE_SHIFT);
+    unsigned long frame_addr = physical_start;
     unsigned long vaddr = virtual_start;
-    unsigned long pte;
-    unsigned long index2;
+    pte_t *pte;
+
+    /* TODO: BUG_ON physical_start not aligned */
 
     while(frame_addr < end) {
-        index2 = (vaddr & PGTBL_L2_INDEX_MASK) >> PGTBL_L2_INDEX_SHIFT;
-        
-        /* Setup gigapage level2 table */
-        pte = frame_addr;
-
-        /* TODO: Change this to be a BUG_ON() if not aligned */
-        /* Align addr to 1GB */
-        pte &= PGTBL_L2_MAP_MASK;
-
-        /* Shifts to turn into pte */
-        pte =  (pte >> PGTBL_PAGE_SIZE_SHIFT) << PGTBL_PTE_ADDR_SHIFT;
-        pte |= PGTBL_PTE_VALID_MASK;
-        pte |= PGTBL_PTE_EXECUTE_MASK;
-        pte |= PGTBL_PTE_WRITE_MASK;
-        pte |= PGTBL_PTE_READ_MASK;
-        xen_second_pagetable[index2] = pte;
+        pte = &xen_second_pagetable[pagetable_second_index(vaddr)];
+        pte->pte.ppn = paddr_to_gigapage_ppn(frame_addr);
+        pte->pte.flags.valid = 1;
+        pte->pte.flags.executable = 1;
+        pte->pte.flags.readable = 1;
+        pte->pte.flags.writable = 1;
 
         frame_addr += PGTBL_L2_BLOCK_SIZE;
         vaddr += PGTBL_L2_BLOCK_SIZE;
