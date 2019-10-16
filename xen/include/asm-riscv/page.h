@@ -220,41 +220,16 @@ typedef struct {
 	unsigned long pgd;
 } pgd_t;
 
-typedef struct {
-    unsigned long valid: 1;
-    unsigned long readable: 1;
-    unsigned long writable: 1;
-    unsigned long executable: 1;
-    unsigned long user: 1;
-    unsigned long global: 1;
-    unsigned long accessed: 1;
-    unsigned long dirty: 1;
-    unsigned long rsw: 2;
-} __attribute__((packed)) pte_flags_t;
-
-typedef struct {
-    pte_flags_t flags;
-    /* mfn = RISC-V spec's PPN1 and PPN0 */
-    unsigned long ppn: 18;
-} __attribute__((packed)) sv32_pte_t;
-
-typedef struct {
-    pte_flags_t flags;
-    /* mfn = RISC-V spec's PPN2, PPN1, and PPN0 */
-    unsigned long ppn: 27;
-} __attribute__((packed)) sv39_pte_t;
-
-typedef struct {
-    pte_flags_t flags;
-    /* mfn = RISC-V spec's PPN3, PPN2, PPN1, and PPN0 */
-    unsigned long ppn: 36;
-} __attribute__((packed)) sv48_pte_t;
+#define PTE_VALID       BIT(0, UL)
+#define PTE_READABLE    BIT(1, UL)
+#define PTE_WRITABLE    BIT(2, UL)
+#define PTE_EXECUTABLE  BIT(3, UL)
+#define PTE_DEFAULT (PTE_VALID | PTE_READABLE | PTE_WRITABLE | PTE_EXECUTABLE)
 
 /* Page Table entry */
-typedef union {
-    uint64_t bits;
-    sv39_pte_t pte;
-} __attribute__((packed)) pte_t;
+typedef struct {
+    uint64_t pte;
+} pte_t;
 
 typedef struct {
 	unsigned long pgprot;
@@ -262,18 +237,31 @@ typedef struct {
 
 typedef struct page *pgtable_t;
 
-#define pte_val(x)	((x).bits)
+#define pte_val(x)	((x).pte)
 #define pgd_val(x)	((x).pgd)
 #define pgprot_val(x)	((x).pgprot)
-#define pte_is_valid(pte_)                ((pte_).pte.flags.valid)
-#define pte_get_mfn(pte_)                   (pte_.pte.ppn)
+
+static inline bool pte_is_valid(pte_t *p)
+{
+    return p->pte & PTE_VALID;
+}
+
+/* Shift the VPN[x] or PPN[x] fields of a virtual or physical address
+ * to become the shifted PPN[x] fields of a page table entry */
+#define addr_to_ppn(x) (((x) >> PGTBL_PAGE_SIZE_SHIFT) << PGTBL_PTE_ADDR_SHIFT)
+
+static inline pte_t paddr_to_pte(unsigned long paddr)
+{
+    return (pte_t) { .pte = addr_to_ppn(paddr) };
+}
+
+#define pte_get_mfn(pte_)         _mfn(((pte_).pte) >> PGTBL_PTE_ADDR_SHIFT)
 
 #define MEGAPAGE_MASK (PGTBL_L1_MAP_MASK | PGTBL_L2_MAP_MASK)
 #define GIGAPAGE_MASK PGTBL_L2_MAP_MASK
 
-#define paddr_to_ppn(x) (((x) >> PGTBL_PAGE_SIZE_SHIFT) << PGTBL_PTE_ADDR_SHIFT)
-#define paddr_to_megapage_ppn(x) paddr_to_ppn((x) & MEGAPAGE_MASK)
-#define paddr_to_gigapage_ppn(x) paddr_to_ppn((x) & GIGAPAGE_MASK)
+#define paddr_to_megapage_ppn(x) addr_to_ppn((x) & MEGAPAGE_MASK)
+#define paddr_to_gigapage_ppn(x) addr_to_ppn((x) & GIGAPAGE_MASK)
 
 #define __pte(x)	((pte_t) { (x) })
 #define __pgd(x)	((pgd_t) { (x) })

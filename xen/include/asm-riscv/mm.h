@@ -190,7 +190,7 @@ static inline void *maddr_to_virt(paddr_t ma)
 }
 
 /* Convert between Xen-heap virtual addresses and machine frame numbers. */
-#define __virt_to_mfn(va) (virt_to_maddr(va) >> PAGE_SHIFT)
+#define __virt_to_mfn(va)  (virt_to_maddr(va) >> PAGE_SHIFT)
 #define __mfn_to_virt(mfn) (maddr_to_virt((paddr_t)(mfn) << PAGE_SHIFT))
 
 /*
@@ -279,12 +279,13 @@ void setup_xenheap_mappings(unsigned long heap_start, unsigned long page_cnt);
 void setup_frametable_mappings(paddr_t ps, paddr_t pe);
 void setup_domheap_pagetables(void);
 
-void __attribute__ ((section(".entry"))) setup_initial_pagetables(unsigned long *second,
-                                                          unsigned long *first,
-                                                          unsigned long *zeroeth,
-                                                          unsigned long map_start,
-                                                          unsigned long map_end,
-                                                          unsigned long pa_start);
+void __attribute__ ((section(".entry")))
+setup_initial_pagetables(pte_t *second,
+                         pte_t *first,
+                         pte_t *zeroeth,
+                         unsigned long map_start,
+                         unsigned long map_end,
+                         unsigned long pa_start);
 
 
 #endif /*  __ARCH_RISCV_MM__ */

@@ -43,10 +43,10 @@ mm_printk(const char *fmt, ...) {}
 
 #define DECLARE_OFFSETS(var, addr)          \
     const unsigned int var[4] = {           \
-        pgtbl_zeroeth_index(addr),          \
-        pgtbl_first_index(addr),            \
-        pgtbl_second_index(addr),           \
-        pgtbl_third_index(addr),            \
+        pagetable_zeroeth_index(addr),          \
+        pagetable_first_index(addr),            \
+        pagetable_second_index(addr),           \
+        pagetable_third_index(addr),            \
     }
 
 /* TODO: remove these if they're not needed pte_t boot_pgtable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
@@ -100,7 +100,7 @@ unsigned long total_pages;
 
 static inline pte_t mfn_to_pte(mfn_t mfn)
 {
-   return (pte_t) { .pte.ppn = mfn_x(mfn) };
+   return (pte_t) { .pte = mfn_x(mfn) };
 }
 
 
@@ -111,7 +111,7 @@ void *__init arch_vmap_virt_end(void)
 
 static inline pte_t mfn_to_xen_entry(mfn_t mfn)
 {
-    return (pte_t) { .pte.ppn = mfn_x(mfn) };
+    return mfn_to_pte(mfn);
 }
 
 static inline pte_t pte_of_xenaddr(vaddr_t va)
@@ -251,10 +251,8 @@ static int create_xen_table(pte_t *entry)
 
     clear_page(p);
     pte = mfn_to_xen_entry(maddr_to_mfn((unsigned long)p));
-    pte.pte.flags.readable = 1;
-    pte.pte.flags.writable = 1;
-    pte.pte.flags.executable = 1;
-    pte.pte.flags.valid = 1;
+    pte.pte |= PTE_DEFAULT;
+
     /* Entries pointing to tables have their permissions set to 0 */
     write_pte(entry, pte);
     return 0;
@@ -292,7 +290,7 @@ static int xen_pt_next_level(unsigned int level,
 
     entry = *table + offset;
 
-    if ( !pte_is_valid(*entry) )
+    if ( !pte_is_valid(entry) )
     {
 
 /* TODO */
@@ -439,7 +437,7 @@ static int create_xen_entries(enum xenmap_operation op,
      *
      * XXX: Add a check.
      */
-    const mfn_t root = virt_to_mfn(THIS_CPU_PGTABLE);
+    const mfn_t root = _mfn(virt_to_mfn(THIS_CPU_PGTABLE));
 
     switch (op) {
     case INSERT:
@@ -719,8 +717,6 @@ unsigned long get_upper_mfn_bound(void)
     return max_page - 1;
 }
 
-#define boot_phys(linkaddr) ((linkaddr) - xen_link_start + xen_start)
-
 /* Creates megapages of 2MB size based on sv39 spec */
 /* TODO: make page_cnt not expect 4KB pages, change to 2MB pages? */
  void setup_heap_megapages(unsigned long virtual_start, 
@@ -731,22 +727,22 @@ unsigned long get_upper_mfn_bound(void)
     unsigned long end = physical_start + (page_cnt << PAGE_SHIFT);
     unsigned long vaddr = virtual_start;
     unsigned long paddr;
-    pte_t *pte;
+    unsigned long index;
+    pte_t *p;
 
     /* TODO: BUG_ON physical start is not megapage aligned */
 
-    paddr = boot_phys((unsigned long)&xen_heap_megapages);
-    pte = &xen_second_pagetable[pagetable_second_index(vaddr)];
-    pte->pte.ppn = paddr_to_ppn(paddr);
-    pte->pte.flags.valid = 1;
+    paddr = phys_offset + ((unsigned long)xen_heap_megapages);
+    index = pagetable_second_index(vaddr);
+    p = &xen_second_pagetable[index];
+    p->pte = addr_to_ppn(paddr);
+    p->pte |= PTE_VALID;
 
     while(frame_addr < end) {
-        pte = &xen_heap_megapages[pagetable_first_index(vaddr)];
-        pte->pte.ppn = paddr_to_megapage_ppn(paddr);
-        pte->pte.flag.valid = 1;
-        pte->pte.flag.readable = 1;
-        pte->pte.flag.writable = 1;
-        pte->pte.flag.executable = 1;
+        index = pagetable_first_index(vaddr);
+        p = &xen_heap_megapages[index];
+        p->pte = paddr_to_megapage_ppn(frame_addr);
+        p->pte |= PTE_DEFAULT;
 
         frame_addr += PGTBL_L1_BLOCK_SIZE;
         vaddr += PGTBL_L1_BLOCK_SIZE;
@@ -757,25 +753,20 @@ unsigned long get_upper_mfn_bound(void)
 
 /* Creates gigapages of 1GB size based on sv39 spec */
 /* TODO: make page_cnt not expect 4KB pages, change to 1GB pages? */
-void setup_gigapages(
-                    unsigned long virtual_start, 
-                    unsigned long physical_start,
-                    unsigned long page_cnt)
+ void setup_gigapages(unsigned long virtual_start, 
+                      unsigned long physical_start,
+                      unsigned long page_cnt)
 {
     unsigned long end = physical_start + (page_cnt << PAGE_SHIFT);
     unsigned long frame_addr = physical_start;
     unsigned long vaddr = virtual_start;
-    pte_t *pte;
+    pte_t *p;
 
     /* TODO: BUG_ON physical_start not aligned */
-
     while(frame_addr < end) {
-        pte = &xen_second_pagetable[pagetable_second_index(vaddr)];
-        pte->pte.ppn = paddr_to_gigapage_ppn(frame_addr);
-        pte->pte.flags.valid = 1;
-        pte->pte.flags.executable = 1;
-        pte->pte.flags.readable = 1;
-        pte->pte.flags.writable = 1;
+        p = &xen_second_pagetable[pagetable_second_index(vaddr)];
+        p->pte = paddr_to_gigapage_ppn(frame_addr);
+        p->pte |= PTE_DEFAULT;
 
         frame_addr += PGTBL_L2_BLOCK_SIZE;
         vaddr += PGTBL_L2_BLOCK_SIZE;
@@ -835,9 +826,9 @@ void __init clear_pagetables(unsigned long load_addr, unsigned long linker_addr)
 }
 
 void __attribute__ ((section(".entry")))
-setup_initial_pagetables(unsigned long *second,
-                         unsigned long *first,
-                         unsigned long *zeroeth,
+setup_initial_pagetables(pte_t *second,
+                         pte_t *first,
+                         pte_t *zeroeth,
                          unsigned long map_start,
                          unsigned long map_end,
                          unsigned long pa_start) {
@@ -852,32 +843,23 @@ setup_initial_pagetables(unsigned long *second,
 
     page_addr = map_start;
     while (page_addr < map_end) {
-        index2 = (page_addr & PGTBL_L2_INDEX_MASK) >> PGTBL_L2_INDEX_SHIFT;
-        index1 = (page_addr & PGTBL_L1_INDEX_MASK) >> PGTBL_L1_INDEX_SHIFT;
-        index0 = (page_addr & PGTBL_L0_INDEX_MASK) >> PGTBL_L0_INDEX_SHIFT;
+        index2 = pagetable_second_index(page_addr);
+        index1 = pagetable_first_index(page_addr);
+        index0 = pagetable_zeroeth_index(page_addr);
 
         /* Setup level2 table */
-        second[index2] = (unsigned long) &first[index1];
-        second[index2] = second[index2] >> PGTBL_PAGE_SIZE_SHIFT;
-        second[index2] = second[index2] << PGTBL_PTE_ADDR_SHIFT;
-        second[index2] |= PGTBL_PTE_VALID_MASK;
+        second[index2] = paddr_to_pte((unsigned long) &first[index1]);
+        second[index2].pte |= PTE_VALID;
 
         /* Setup level1 table */
-        first[index1] = (unsigned long) &zeroeth[index0];
-        first[index1] = first[index1] >> PGTBL_PAGE_SIZE_SHIFT;
-        first[index1] = first[index1] << PGTBL_PTE_ADDR_SHIFT;
-        first[index1] |= PGTBL_PTE_VALID_MASK;
+        first[index1] = paddr_to_pte((unsigned long) &zeroeth[index0]);
+        first[index1].pte |= PTE_VALID;
 
         /* Setup level0 table */
-        if (!(zeroeth[index0] & PGTBL_PTE_VALID_MASK)) {
+        if (!(zeroeth[index0].pte & PGTBL_PTE_VALID_MASK)) {
                 /* Update level0 table */
-                zeroeth[index0] = (page_addr - map_start) + pa_start;
-                zeroeth[index0] = zeroeth[index0] >> PGTBL_PAGE_SIZE_SHIFT;
-                zeroeth[index0] = zeroeth[index0] << PGTBL_PTE_ADDR_SHIFT;
-                zeroeth[index0] |= PGTBL_PTE_EXECUTE_MASK;
-                zeroeth[index0] |= PGTBL_PTE_WRITE_MASK;
-                zeroeth[index0] |= PGTBL_PTE_READ_MASK;
-                zeroeth[index0] |= PGTBL_PTE_VALID_MASK;
+                zeroeth[index0] = paddr_to_pte((page_addr - map_start) + pa_start);
+                zeroeth[index0].pte |= PTE_DEFAULT;
         }
 
         /* Point to next page */
@@ -925,16 +907,16 @@ void __attribute__ ((section(".entry")))
     _setup_initial_pagetables(unsigned long load_addr_start, unsigned long load_addr_end,
 			 unsigned long linker_addr_start, unsigned long linker_addr_end)
 {
-    unsigned long *second;
-    unsigned long *first;
-    unsigned long *zeroeth;
+    pte_t *second;
+    pte_t *first;
+    pte_t *zeroeth;
 
     clear_pagetables(load_addr_start, linker_addr_start);
 
     /* Get the addresses where the page tables were loaded */
-    second = (unsigned long *)load_addr(&xen_second_pagetable);
-    first = (unsigned long *)load_addr(&xen_first_pagetable);
-    zeroeth = (unsigned long *)load_addr(&xen_zeroeth_pagetable);
+    second = (pte_t *) load_addr(&xen_second_pagetable);
+    first = (pte_t *) load_addr(&xen_first_pagetable);
+    zeroeth = (pte_t *) load_addr(&xen_zeroeth_pagetable);
 
     /* Create a mapping of the load time address range to... the load time address range.
      * This mapping is used at boot time only.
@@ -976,7 +958,6 @@ void __attribute__ ((section(".entry")))
     xen_end = load_addr_end;
     xen_link_start = linker_addr_start;
     xen_link_end = linker_addr_end;
-
 
     phys_offset = load_addr_start > linker_addr_start
                     ? load_addr_start - linker_addr_start
