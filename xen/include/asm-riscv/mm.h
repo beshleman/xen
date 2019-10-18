@@ -171,13 +171,6 @@ extern vaddr_t xenheap_virt_start;
 extern unsigned long max_page;
 extern unsigned long total_pages;
 
-static inline paddr_t __virt_to_maddr(vaddr_t va)
-{
-    uint64_t par = va_to_par(va);
-    return (par & PADDR_MASK & PAGE_MASK) | (va & ~PAGE_MASK);
-}
-#define virt_to_maddr(va)   __virt_to_maddr((vaddr_t)(va))
-
 /* Page-align address and convert to frame number format */
 #define paddr_to_pfn_aligned(paddr)    paddr_to_pfn(PAGE_ALIGN(paddr))
 
@@ -188,6 +181,8 @@ static inline void *maddr_to_virt(paddr_t ma)
                     ((ma & ma_va_bottom_mask) |
                      ((ma & ma_top_mask) >> pfn_pdx_hole_shift)));
 }
+
+#define virt_to_maddr(va) ((unsigned long)(va))
 
 /* Convert between Xen-heap virtual addresses and machine frame numbers. */
 #define __virt_to_mfn(va)  (virt_to_maddr(va) >> PAGE_SHIFT)

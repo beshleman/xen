@@ -49,10 +49,6 @@ mm_printk(const char *fmt, ...) {}
         pagetable_third_index(addr),            \
     }
 
-/* TODO: remove these if they're not needed pte_t boot_pgtable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
-pte_t boot_first[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
-pte_t boot_first_id[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
-*/
 
 /* Limits of the Xen heap */
 mfn_t xenheap_mfn_start __read_mostly = INVALID_MFN_INITIALIZER;
@@ -73,7 +69,7 @@ pte_t xen_second_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 static pte_t xen_first_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 static pte_t xen_zeroeth_pagetable[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
 static pte_t xen_heap_megapages[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
-static pte_t xen_domheap_megapages[PAGE_ENTRIES] __attribute__((__aligned__(4096)));
+static pte_t xen_domheap_megapages[0] __attribute__((__aligned__(4096)));
 
 #define THIS_CPU_PGTABLE xen_second_pagetable
 
@@ -148,7 +144,7 @@ void unmap_domain_page_global(const void *va)
 void *map_domain_page(mfn_t mfn)
 {
     unsigned long flags;
-    pte_t *map = this_cpu(xen_dommap);
+    pte_t *map = this_cpu(xen_domheap_megapages);
     unsigned long slot_mfn = mfn_x(mfn) & ~PAGE_MASK;
     vaddr_t va;
     pte_t pte;
@@ -194,7 +190,7 @@ void *map_domain_page(mfn_t mfn)
 void unmap_domain_page(const void *va)
 {
     unsigned long flags;
-    pte_t *map = this_cpu(xen_dommap);
+    pte_t *map = this_cpu(xen_domheap_megapages);
     int slot = ((unsigned long) va - DOMHEAP_VIRT_START) >> PGTBL_L1_INDEX_SHIFT;
 
     local_irq_save(flags);
@@ -251,9 +247,8 @@ static int create_xen_table(pte_t *entry)
 
     clear_page(p);
     pte = mfn_to_xen_entry(maddr_to_mfn((unsigned long)p));
-    pte.pte |= PTE_DEFAULT;
+    pte.pte |= PTE_VALID;
 
-    /* Entries pointing to tables have their permissions set to 0 */
     write_pte(entry, pte);
     return 0;
 }
@@ -417,6 +412,12 @@ out:
     return rc;
 }
 
+static uint64_t va_to_pa(vaddr_t va)
+{
+    return ((uint64_t)va) + phys_offset;
+    
+}
+
 static DEFINE_SPINLOCK(xen_pt_lock);
 
 static int create_xen_entries(enum xenmap_operation op,
@@ -437,7 +438,7 @@ static int create_xen_entries(enum xenmap_operation op,
      *
      * XXX: Add a check.
      */
-    const mfn_t root = _mfn(virt_to_mfn(THIS_CPU_PGTABLE));
+    const mfn_t root = _mfn(va_to_pa((vaddr_t) THIS_CPU_PGTABLE));
 
     switch (op) {
     case INSERT:
@@ -717,6 +718,47 @@ unsigned long get_upper_mfn_bound(void)
     return max_page - 1;
 }
 
+static void setup_second_level_mappings(pte_t *first_pagetable,
+                                unsigned long vaddr)
+{
+    unsigned long paddr, index;
+    pte_t *p;
+
+    paddr = phys_offset + ((unsigned long)first_pagetable);
+    index = pagetable_second_index(vaddr);
+    p = &xen_second_pagetable[index];
+    p->pte = addr_to_ppn(paddr);
+    p->pte |= PTE_VALID;
+}
+
+void setup_megapages(pte_t *first_pagetable,
+                     unsigned long virtual_start, 
+                     unsigned long physical_start,
+                     unsigned long page_cnt)
+{
+    unsigned long frame_addr = physical_start;
+    unsigned long end = physical_start + (page_cnt << PAGE_SHIFT);
+    unsigned long vaddr = virtual_start;
+    unsigned long index;
+    pte_t *p;
+
+    /* TODO: BUG_ON physical start is not megapage aligned */
+
+    setup_second_level_mappings(first_pagetable, vaddr);
+
+    while(frame_addr < end) {
+        index = pagetable_first_index(vaddr);
+        p = &first_pagetable[index];
+        p->pte = paddr_to_megapage_ppn(frame_addr);
+        p->pte |= PTE_DEFAULT;
+
+        frame_addr += PGTBL_L1_BLOCK_SIZE;
+        vaddr += PGTBL_L1_BLOCK_SIZE;
+    }
+
+    asm volatile ("sfence.vma");
+}
+
 /* Creates megapages of 2MB size based on sv39 spec */
 /* TODO: make page_cnt not expect 4KB pages, change to 2MB pages? */
  void setup_heap_megapages(unsigned long virtual_start, 
@@ -726,18 +768,18 @@ unsigned long get_upper_mfn_bound(void)
     unsigned long frame_addr = physical_start;
     unsigned long end = physical_start + (page_cnt << PAGE_SHIFT);
     unsigned long vaddr = virtual_start;
-    unsigned long paddr;
     unsigned long index;
     pte_t *p;
 
     /* TODO: BUG_ON physical start is not megapage aligned */
 
-    paddr = phys_offset + ((unsigned long)xen_heap_megapages);
-    index = pagetable_second_index(vaddr);
-    p = &xen_second_pagetable[index];
-    p->pte = addr_to_ppn(paddr);
-    p->pte |= PTE_VALID;
+    setup_second_level_mappings(xen_heap_megapages, vaddr);
 
+    /*
+     * Setup the first level mappings.
+     * These are megapages, so there are no zeroeth-level
+     * mappings.
+     */
     while(frame_addr < end) {
         index = pagetable_first_index(vaddr);
         p = &xen_heap_megapages[index];
@@ -788,8 +830,16 @@ void setup_xenheap_mappings(unsigned long heap_start, unsigned long page_cnt)
 
 void setup_domheap_pagetables(void)
 {
+    /* We only need to point the second level heap
+     * to the first level, we will allocate the rest later
+     * with map_domain_page().
+     */
 
-    (void)xen_domheap_megapages;
+    (void) xen_domheap_megapages;
+
+#if 0
+    setup_second_level_mappings(xen_domheap_megapages, DOMHEAP_VIRT_START);
+#endif
 }
 
 void setup_pagetables(unsigned long boot_phys_offset)
