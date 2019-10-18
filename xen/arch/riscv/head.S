@@ -103,6 +103,8 @@ _start_hang:
 	j	_start_hang
 
 	.align 3
+__phys_offset:
+	RISCV_PTR phys_offset
 __pgtbl_root:
 	RISCV_PTR xen_second_pagetable
 __exec_start:
@@ -160,6 +162,11 @@ _cpu_init:
 	/* Re-setup exception handler */
 	la	a6, _start_hang
 	csrw	CSR_STVEC, a6
+
+        /* Set stack pointer to virtual address at end of the Xen executable */
+	la	a6, __exec_end
+        REG_L   sp, (a6)
+
 
 	/* Jump to C code */
 	call	start_xen
