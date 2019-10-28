@@ -199,7 +199,7 @@ static int alloc_xen_table(pte_t *entry)
     return 0;
 }
 
-static int xen_pt_update_entry(unsigned long va, mfn_t mfn, unsigned int flags)
+static int xen_pt_update(unsigned long va, mfn_t mfn, unsigned int flags)
 {
     pte_t *entry;
     pte_t *first;
@@ -258,14 +258,11 @@ static int xen_pt_update_entry(unsigned long va, mfn_t mfn, unsigned int flags)
 
 static DEFINE_SPINLOCK(xen_pt_lock);
 
-static int create_xen_entries(enum xenmap_operation op, unsigned long virt,
-                              mfn_t mfn, unsigned long nr_mfns,
-                              unsigned int flags)
+int map_pages_to_xen(unsigned long virt, mfn_t mfn, unsigned long nr_mfns,
+                     unsigned int flags)
 {
     int rc = 0;
     unsigned long addr = virt, addr_end = addr + nr_mfns * PAGE_SIZE;
-
-    (void)op;
 
     rc = 1;
 
@@ -278,7 +275,7 @@ static int create_xen_entries(enum xenmap_operation op, unsigned long virt,
     spin_lock(&xen_pt_lock);
     while ( addr < addr_end )
     {
-        rc = xen_pt_update_entry(addr, mfn, flags);
+        rc = xen_pt_update(addr, mfn, flags);
         if ( rc == XEN_TABLE_MAP_FAILED )
             break;
 
@@ -297,30 +294,40 @@ static int create_xen_entries(enum xenmap_operation op, unsigned long virt,
     return 0;
 }
 
-int map_pages_to_xen(unsigned long virt, mfn_t mfn, unsigned long nr_mfns,
-                     unsigned int flags)
-{
-    return create_xen_entries(INSERT, virt, mfn, nr_mfns, flags);
-}
-
 int populate_pt_range(unsigned long virt, unsigned long nr_mfns)
 {
-    return create_xen_entries(RESERVE, virt, INVALID_MFN, nr_mfns, 0);
+    (void) virt;
+    (void) nr_mfns;
+
+    /* TODO */
+
+    return  0;
 }
 
 int destroy_xen_mappings(unsigned long v, unsigned long e)
 {
-    return create_xen_entries(REMOVE, v, INVALID_MFN, (e - v) >> PAGE_SHIFT, 0);
+    (void) v;
+    (void) e;
+
+    /* TODO */
+
+    return 0;
 }
 
 int modify_xen_mappings(unsigned long s, unsigned long e, unsigned int flags)
 {
-    return create_xen_entries(MODIFY, s, INVALID_MFN, (e - s) >> PAGE_SHIFT,
-                              flags);
+    (void) s;
+    (void) e;
+    (void) flags;
+
+    /* TODO */
+
+    return 0;
 }
 
 void arch_dump_shared_mem_info(void)
 {
+    /* TODO */
 }
 
 int donate_page(struct domain *d, struct page_info *page, unsigned int memflags)
@@ -369,6 +376,7 @@ int xenmem_add_to_physmap_one(struct domain *d, unsigned int space,
 
 long arch_memory_op(int op, XEN_GUEST_HANDLE_PARAM(void) arg)
 {
+    /* TODO */
     return 0;
 }
 
@@ -535,15 +543,16 @@ unsigned long get_upper_mfn_bound(void)
 static void setup_second_level_mappings(pte_t *first_pagetable,
                                         unsigned long vaddr)
 {
-    unsigned long paddr, index;
+    unsigned long paddr;
+    unsigned long index;
     pte_t *p;
 
-    paddr = phys_offset + ((unsigned long)first_pagetable);
     index = pagetable_second_index(vaddr);
     p = &xen_second_pagetable[index];
 
     if ( !pte_is_valid(p) )
     {
+        paddr = phys_offset + ((unsigned long)first_pagetable);
         p->pte = addr_to_ppn(paddr);
         p->pte |= PTE_TABLE;
     }
@@ -558,7 +567,7 @@ void setup_megapages(pte_t *first_pagetable, unsigned long virtual_start,
     unsigned long index;
     pte_t *p;
 
-    BUG_ON(!IS_ALIGNED(physical_start, MB(2)));
+    BUG_ON(!IS_ALIGNED(physical_start, FIRST_SIZE));
 
     while ( frame_addr < end )
     {
@@ -726,7 +735,7 @@ setup_initial_pagetables(pte_t *second, pte_t *first, pte_t *zeroeth,
         first[index1].pte |= PTE_TABLE;
 
         /* Setup level0 table */
-        if ( !pte_is_valid(&zeroeth[index0] ) )
+        if ( !pte_is_valid(&zeroeth[index0]) )
         {
             /* Update level0 table */
             zeroeth[index0] = paddr_to_pte((page_addr - map_start) + pa_start);
@@ -864,6 +873,7 @@ void __init setup_frametable_mappings(paddr_t ps, paddr_t pe)
 
     first_entries_remaining = 0;
     mfn = base;
+
     /* Map the frametable virtual address speace to thse pages */
     for ( i = ROUNDUP(FRAMETABLE_VIRT_START, MB(2)); i < virt_end; i += MB(2) )
     {
