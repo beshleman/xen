@@ -37,20 +37,7 @@ DEFINE_PER_CPU(struct vcpu *, curr_vcpu);
 
 static void do_idle(void)
 {
-    unsigned int cpu = smp_processor_id();
-
-    sched_tick_suspend();
-    /* sched_tick_suspend() can raise TIMER_SOFTIRQ. Process it now. */
-    process_pending_softirqs();
-
-    local_irq_disable();
-    if ( cpu_is_haltable(cpu) )
-    {
-        wait_for_interrupt();
-    }
-    local_irq_enable();
-
-    sched_tick_resume();
+	/* TODO */
 }
 
 void idle_loop(void)
