@@ -11,6 +11,7 @@
 #include <xen/mm.h>
 #include <xen/serial.h>
 #include <xen/cache.h>
+#include <asm/processor.h>
 
 /* Never drop characters, even if the async transmit buffer fills. */
 /* #define SERIAL_NEVER_DROP_CHARS 1 */
