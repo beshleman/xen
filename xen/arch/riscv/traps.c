@@ -48,6 +48,11 @@ void vcpu_show_execution_state(struct vcpu *v)
     /* TODO */
 }
 
+void arch_hypercall_tasklet_result(struct vcpu *v, long res)
+{
+	/* TODO */
+}
+
 enum mc_disposition arch_do_multicall_call(struct mc_state *state)
 {
     /* TODO */
