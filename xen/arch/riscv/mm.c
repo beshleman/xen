@@ -465,66 +465,29 @@ void *ioremap(paddr_t pa, size_t len)
     return ioremap_attr(pa, len, PAGE_HYPERVISOR_NOCACHE);
 }
 
+#ifdef CONFIG_GRANT_TABLE
 void gnttab_clear_flags(struct domain *d, unsigned long nr, uint16_t *addr)
 {
-    /*
-     * Note that this cannot be clear_bit(), as the access must be
-     * confined to the specified 2 bytes.
-     */
-    uint16_t mask = ~(1 << nr), old;
-
-    do
-    {
-        old = *addr;
-    } while ( cmpxchg(addr, old, old & mask) != old );
+	/* TODO */
 }
 
 void gnttab_mark_dirty(struct domain *d, mfn_t mfn)
 {
-    /* XXX: mark dirty */
-    static int warning;
-    if ( !warning )
-    {
-        gdprintk(XENLOG_WARNING, "gnttab_mark_dirty not implemented yet\n");
-        warning = 1;
-    }
+	/* TODO */
 }
 
 int create_grant_host_mapping(unsigned long addr, mfn_t frame,
                               unsigned int flags, unsigned int cache_flags)
 {
-    int rc;
-    p2m_type_t t = p2m_grant_map_rw;
-
-    if ( cache_flags || (flags & ~GNTMAP_readonly) != GNTMAP_host_map )
-        return GNTST_general_error;
-
-    if ( flags & GNTMAP_readonly )
-        t = p2m_grant_map_ro;
-
-    rc = guest_physmap_add_entry(current->domain, gaddr_to_gfn(addr), frame, 0,
-                                 t);
-
-    if ( rc )
-        return GNTST_general_error;
-    else
-        return GNTST_okay;
+	/* TODO */
 }
 
 int replace_grant_host_mapping(unsigned long addr, mfn_t mfn,
                                unsigned long new_addr, unsigned int flags)
 {
-    gfn_t gfn = gaddr_to_gfn(addr);
-    struct domain *d = current->domain;
-    int rc;
-
-    if ( new_addr != 0 || (flags & GNTMAP_contains_pte) )
-        return GNTST_general_error;
-
-    rc = guest_physmap_remove_page(d, gfn, mfn, 0);
-
-    return rc ? GNTST_general_error : GNTST_okay;
+	/* TODO */
 }
+#endif
 
 bool is_iomem_page(mfn_t mfn)
 {
