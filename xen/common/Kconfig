@@ -13,7 +13,6 @@ config CORE_PARKING
 
 config GRANT_TABLE
 	bool "Grant table support" if EXPERT = "y"
-	default y
 	---help---
 	  Grant table provides a generic mechanism to memory sharing
 	  between domains. This shared memory interface underpins the

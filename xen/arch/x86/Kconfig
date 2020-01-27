@@ -26,6 +26,7 @@ config X86
 	select HAS_VPCI if !PV_SHIM_EXCLUSIVE && HVM
 	select NEEDS_LIBELF
 	select NUMA
+	select GRANT_TABLE
 
 config ARCH_DEFCONFIG
 	string

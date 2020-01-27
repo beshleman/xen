@@ -21,6 +21,7 @@ config ARM
 	select HAS_PASSTHROUGH
 	select HAS_PDX
 	select IOMMU_FORCE_PT_SHARE
+	select GRANT_TABLE
 
 config ARCH_DEFCONFIG
 	string
