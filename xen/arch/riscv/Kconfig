@@ -20,8 +20,8 @@ config RISCV
 
 config ARCH_DEFCONFIG
 	string
-	default "arch/riscv/configs/arm32_defconfig" if RISCV_32
-	default "arch/riscv/configs/arm64_defconfig" if RISCV_64
+	default "arch/riscv/configs/riscv32_defconfig" if RISCV_32
+	default "arch/riscv/configs/riscv64_defconfig" if RISCV_64
 
 menu "Architecture Features"
 
