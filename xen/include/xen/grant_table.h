@@ -29,8 +29,9 @@
 #include <asm/page.h>
 #include <asm/grant_table.h>
 
-#ifdef CONFIG_GRANT_TABLE
 struct grant_table;
+
+#ifdef CONFIG_GRANT_TABLE
 
 extern unsigned int opt_max_grant_frames;
 
