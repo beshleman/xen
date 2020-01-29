@@ -18,8 +18,11 @@
 #include <xen/mm.h>
 #include <xen/watchdog.h>
 #include <xen/init.h>
-#include <asm/debugger.h>
 #include <asm/div64.h>
+
+#ifdef CONFIG_X86
+#include <asm/debugger.h>
+#endif
 
 static unsigned char keypress_key;
 static bool_t alt_key_handling;
@@ -484,7 +487,9 @@ static void run_all_keyhandlers(unsigned char key, struct cpu_user_regs *regs)
 static void do_debug_key(unsigned char key, struct cpu_user_regs *regs)
 {
     printk("'%c' pressed -> trapping into debugger\n", key);
+#ifdef CONFIG_x86
     (void)debugger_trap_fatal(0xf001, regs);
+#endif
 
     /* Prevent tail call optimisation, which confuses xendbg. */
     barrier();

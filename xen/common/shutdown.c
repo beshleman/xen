@@ -7,8 +7,11 @@
 #include <xen/shutdown.h>
 #include <xen/console.h>
 #include <xen/kexec.h>
-#include <asm/debugger.h>
 #include <public/sched.h>
+
+#ifdef CONFIG_X86
+#include <asm/debugger.h>
+#endif
 
 /* opt_noreboot: If true, machine will need manual reset on error. */
 bool_t __read_mostly opt_noreboot;
@@ -40,7 +43,9 @@ void hwdom_shutdown(u8 reason)
         break; /* not reached */
 
     case SHUTDOWN_crash:
+#ifdef CONFIG_X86
         debugger_trap_immediate();
+#endif
         printk("Hardware Dom%u crashed: ", hardware_domain->domain_id);
         kexec_crash();
         maybe_reboot();
