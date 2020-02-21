@@ -4,6 +4,11 @@
 #include <asm/csr.h>
 #include <asm/config.h>
 
+hw: .asciz "Hello, world!\n"
+
+.equiv SBI_PUTCHAR_EXT, 1
+.equiv SBI_PUTCHAR_FUNC, 0
+
 .global _start
 
 ENTRY(start)
@@ -11,6 +16,7 @@ ENTRY(start)
 _start:
 	/* Mask all interrupts */
 	csrw CSR_SIE, zero
+    csrr t0, CSR_SSTATUS
 
 	/*
 	 * Disable FPU to detect illegal usage of
@@ -18,6 +24,9 @@ _start:
 	 */
 	li t0, SSTATUS_FS
 	csrc CSR_SSTATUS, t0
+
+    la a0, hw
+    jal _puts
 
 	/* Save HART ID and DTB base */
 	la	a6, _bootcpu_reg0
@@ -178,3 +187,18 @@ _cpu_init:
 	j	_start_hang
 
 	ret
+
+/* c-string */
+_puts:
+    mv t0, a0
+1:
+    lb a0, (t0)
+    beqz a0, 2f
+    li a7, SBI_PUTCHAR_EXT
+    li a6, SBI_PUTCHAR_FUNC
+    ecall
+    addi t0, t0, 1
+    j 1b
+
+2:
+    ret
