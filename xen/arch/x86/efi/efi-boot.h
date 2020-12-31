@@ -3,6 +3,8 @@
  * is intended to be included by common/efi/boot.c _only_, and
  * therefore can define arch specific global variables.
  */
+#include <xen/types.h>
+#include <xen/multiboot2.h>
 #include <xen/vga.h>
 #include <asm/e820.h>
 #include <asm/edd.h>
@@ -761,6 +763,10 @@ void __init efi_multiboot2(EFI_HANDLE ImageHandle,
         efi_arch_console_init(cols, rows);
 
     gop = efi_get_gop();
+
+    if ( dom0_kernel && dom0_kernel->mod_end > dom0_kernel->mod_start )
+        efi_shim_lock((VOID *)(unsigned long)dom0_kernel->mod_start,
+                      dom0_kernel->mod_end - dom0_kernel->mod_start);
 
     if ( gop )
         gop_mode = efi_find_gop_mode(gop, 0, 0, 0);
