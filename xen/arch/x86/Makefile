@@ -110,7 +110,7 @@ syms-warn-dup-$(CONFIG_SUPPRESS_DUPLICATE_SYMBOL_WARNINGS) :=
 syms-warn-dup-$(CONFIG_ENFORCE_UNIQUE_SYMBOLS) := --error-dup
 
 $(TARGET): TMP = $(@D)/.$(@F).elf32
-$(TARGET): $(TARGET)-syms $(efi-y) boot/mkelf32
+$(TARGET): $(TARGET).mb.efi $(TARGET)-syms $(efi-y) boot/mkelf32
 	./boot/mkelf32 $(notes_phdrs) $(TARGET)-syms $(TMP) $(XEN_IMG_OFFSET) \
 	               `$(NM) $(TARGET)-syms | sed -ne 's/^\([^ ]*\) . __2M_rwdata_end$$/0x\1/p'`
 	od -t x4 -N 8192 $(TMP)  | grep 1badb002 > /dev/null || \
@@ -118,6 +118,11 @@ $(TARGET): $(TARGET)-syms $(efi-y) boot/mkelf32
 	od -t x4 -N 32768 $(TMP) | grep e85250d6 > /dev/null || \
 		{ echo "No Multiboot2 header found" >&2; false; }
 	mv $(TMP) $(TARGET)
+
+$(TARGET).mb.efi: $(TARGET)-syms
+	$(OBJCOPY) -O binary -S --change-section-address \
+		".efi.pe.header-`$(NM) $(TARGET)-syms | sed -ne 's/^\([^ ]*\) . __image_base__$$/0x\1/p'`" \
+		$(TARGET)-syms $(TARGET).mb.efi
 
 ifneq ($(efi-y),)
 # Check if the compiler supports the MS ABI.

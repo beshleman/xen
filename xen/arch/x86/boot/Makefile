@@ -1,4 +1,5 @@
 obj-bin-y += head.o
+obj-bin-y += pecoff.o
 
 DEFS_H_DEPS = defs.h $(BASEDIR)/include/xen/stdbool.h
 

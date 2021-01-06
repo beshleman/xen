@@ -32,7 +32,8 @@ static void __init edd_put_string(u8 *dst, size_t n, const char *src)
 }
 #define edd_put_string(d, s) edd_put_string(d, ARRAY_SIZE(d), s)
 
-extern const intpte_t __page_tables_start[], __page_tables_end[];
+extern intpte_t __page_tables_start[], __page_tables_end[];
+
 #define in_page_tables(v) ((intpte_t *)(v) >= __page_tables_start && \
                            (intpte_t *)(v) < __page_tables_end)
 
@@ -568,6 +569,7 @@ static void __init efi_arch_video_init(EFI_GRAPHICS_OUTPUT_PROTOCOL *gop,
 
 static void __init efi_arch_memory_setup(void)
 {
+    intpte_t *pte;
     unsigned int i;
     EFI_STATUS status;
 
@@ -591,6 +593,13 @@ static void __init efi_arch_memory_setup(void)
 
     if ( !efi_enabled(EFI_LOADER) )
         return;
+
+    if ( efi_enabled(EFI_MB_LOADER) )
+        for ( pte = __page_tables_start; pte < __page_tables_end; pte += ARRAY_SIZE(l2_directmap) )
+            /* Skip relocating the directmap because start_xen() does this for us when
+             * when it updates all superpage-aligned mappings.  */
+            if ( (pte != (intpte_t *)l2_directmap) && (get_pte_flags(*pte) & _PAGE_PRESENT) )
+                *pte += xen_phys_start;
 
     /*
      * Map Xen into the higher mappings, using 2M superpages.
@@ -724,7 +733,18 @@ static bool __init efi_arch_use_config_file(EFI_SYSTEM_TABLE *SystemTable)
 
 static void __init efi_arch_flush_dcache_area(const void *vaddr, UINTN size) { }
 
-void __init efi_multiboot2(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+void EFIAPI efi_start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable);
+
+void EFIAPI __init noreturn
+efi_mb_start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+{
+    __set_bit(EFI_MB_LOADER, &efi_flags);
+    efi_start(ImageHandle, SystemTable);
+}
+
+void __init efi_multiboot2(EFI_HANDLE ImageHandle,
+                           EFI_SYSTEM_TABLE *SystemTable,
+                           multiboot2_tag_module_t *dom0_kernel)
 {
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
     UINTN cols, gop_mode = ~0, rows;

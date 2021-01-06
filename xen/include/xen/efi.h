@@ -11,6 +11,7 @@ extern unsigned int efi_flags;
 #define EFI_BOOT	0	/* Were we booted from EFI? */
 #define EFI_LOADER	1	/* Were we booted directly from EFI loader? */
 #define EFI_RS		2	/* Can we use runtime services? */
+#define EFI_MB_LOADER	4	/* xen.mb.efi booted directly from EFI loader? */
 
 /* Add fields here only if they need to be referenced from non-EFI code. */
 struct efi {

@@ -1,3 +1,4 @@
+#include <xen/compile.h>
 #include <xen/multiboot.h>
 #include <xen/multiboot2.h>
 #include <public/xen.h>

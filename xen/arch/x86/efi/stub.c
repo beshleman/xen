@@ -15,8 +15,18 @@
  * Here we are in EFI stub. EFI calls are not supported due to lack
  * of relevant functionality in compiler and/or linker.
  *
- * efi_multiboot2() is an exception. Please look below for more details.
+ * efi_mb_start() and efi_multiboot2() are the exceptions.
+ * Please look below for more details.
  */
+
+asm (
+    "    .text                         \n"
+    "    .globl efi_mb_start           \n"
+    "efi_mb_start:                     \n"
+    "    mov    %rcx,%rdi              \n"
+    "    mov    %rdx,%rsi              \n"
+    "    call   efi_multiboot2         \n"
+    );
 
 void __init noreturn efi_multiboot2(EFI_HANDLE ImageHandle,
                                     EFI_SYSTEM_TABLE *SystemTable)

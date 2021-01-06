@@ -63,7 +63,22 @@ SECTIONS
 
   start_pa = ABSOLUTE(start - __XEN_VIRT_START);
 
+#ifdef EFI
   . = __XEN_VIRT_START + XEN_IMG_OFFSET;
+#else
+  /*
+   * Multiboot2 with an EFI PE/COFF header.
+   *
+   * The PE header must be followed by .text section which
+   * starts at __XEN_VIRT_START + XEN_IMG_OFFSET address.
+   */
+  . = __XEN_VIRT_START + XEN_IMG_OFFSET - efi_pe_head_end + efi_pe_head;
+
+  DECL_SECTION(.efi.pe.header) {
+       *(.efi.pe.header)
+  } :NONE
+#endif
+
   _start = .;
   DECL_SECTION(.text) {
         _stext = .;            /* Text and read-only data */
@@ -289,6 +304,13 @@ SECTIONS
        *(.data.rel)
        *(.data.rel.*)
        CONSTRUCTORS
+       /*
+        * A la the PE/COFF spec, the PE file data section must end at the
+        * alignment boundary equal to FileAlignment in the optional header,
+        * i.e., XEN_FILE_ALIGN.
+        */
+       . = ALIGN(XEN_FILE_ALIGN);
+       __pe_text_raw_end = .;
   } :text
 
   DECL_SECTION(.bss) {
@@ -311,6 +333,8 @@ SECTIONS
 
   . = ALIGN(SECTION_ALIGN);
   __2M_rwdata_end = .;
+
+  __pe_SizeOfImage = ALIGN(. - __image_base__, MB(16));
 
 #ifdef EFI
   . = ALIGN(4);
@@ -341,6 +365,7 @@ SECTIONS
        *(.discard.*)
        *(.eh_frame)
 #ifdef EFI
+       *(.efi.pe.header)
        *(.comment)
        *(.comment.*)
        *(.note.Xen)
@@ -391,6 +416,15 @@ ASSERT((trampoline_end - trampoline_start) < TRAMPOLINE_SPACE - MBI_SPACE_MIN,
     "not enough room for trampoline and mbi data")
 ASSERT((wakeup_stack - wakeup_stack_start) >= WAKEUP_STACK_MIN,
     "wakeup stack too small")
+
+#ifndef EFI
+ASSERT(efi_pe_head_end == _start, "PE header does not end at the beginning of .text section")
+ASSERT(_start == __XEN_VIRT_START + XEN_IMG_OFFSET, ".text section begins at wrong address")
+ASSERT(IS_ALIGNED(_start,      XEN_FILE_ALIGN), "_start misaligned")
+ASSERT(IS_ALIGNED(__bss_start, XEN_FILE_ALIGN), "__bss_start misaligned")
+ASSERT(IS_ALIGNED(__pe_SizeOfImage, XEN_LOAD_ALIGN), "__pe_SizeOfImage is not multiple of XEN_LOAD_ALIGN")
+ASSERT(XEN_LOAD_ALIGN >= XEN_FILE_ALIGN, "XEN_LOAD_ALIGN < XEN_FILE_ALIGN")
+#endif
 
 /* Plenty of boot code assumes that Xen isn't larger than 16M. */
 ASSERT(_end - _start <= MB(16), "Xen too large for early-boot assumptions")
